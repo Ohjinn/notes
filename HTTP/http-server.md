@@ -22,6 +22,7 @@ InetAddress의 bindAddr은 특정 주소만 연결 가능하도록 지정할 때
 <br><br>
 
 
+
 - 서버소켓 예시
 ```java
 public static void main(String[] args) throws IOException {
