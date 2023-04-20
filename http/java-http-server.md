@@ -1,12 +1,13 @@
 # JAVA\_HTTP\_Server
 
-* [Java HTTP Server](java-http-server.md#java-http-server)
-* [Java NIO](java-http-server.md#java-nio)
-  * [NIO와 Channel, Buffer](java-http-server.md#nio와-channel-buffer)
-* [Java Lambda expression(람다식)](java-http-server.md#java-lambda-expression람다식)
-  * [Nested 클래스](java-http-server.md#nested-클래스)
-  * [람다](java-http-server.md#람다)
-  * [Java Functional interface(함수형 인터페이스)](java-http-server.md#java-functional-interface함수형-인터페이스)
+- [JAVA\_HTTP\_Server](#java_http_server)
+  - [Java HTTP Server](#java-http-server)
+  - [Java NIO](#java-nio)
+    - [NIO와 Channel, Buffer](#nio와-channel-buffer)
+  - [Java Lambda expression(람다식)](#java-lambda-expression람다식)
+    - [Nested 클래스](#nested-클래스)
+    - [람다](#람다)
+    - [Java Functional interface(함수형 인터페이스)](#java-functional-interface함수형-인터페이스)
 
 \
 \
@@ -567,6 +568,6 @@ public class PredicateExample {
 * predicateOr(): 데이터가 두개의 조건 중 하나라도 맞는지 확인
 * predicateNegate(): 데이터가 조건과 다른지 확인
 
-출처:\
-https://docs.oracle.com/javase/8/docs/jre/api/net/httpserver/spec/com/sun/net/httpserver/HttpServer.html#HttpServer--\
+출처:  
+[오라클](https://docs.oracle.com/javase/8/docs/jre/api/net/httpserver/spec/com/sun/net/httpserver/HttpServer.html#HttpServer--)  
 자바의신

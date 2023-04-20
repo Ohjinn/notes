@@ -309,7 +309,5 @@ RequestMapping(method = RequestMethod.GET)에 상응하는 역할을 하며 HTTP
 
 출처:  
 
-https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/
-https://docs.spring.io/spring-framework/docs/3.2.x/spring-framework-reference/html/mvc.html
-https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/bind/annotation/RestController.html  
-자바의 신
+[스프링독](https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/)  
+자바의 신  

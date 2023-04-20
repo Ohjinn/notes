@@ -1,18 +1,19 @@
 # HTTP
 
-* [HTTP](http.md#http)
-* [HTTP와 HTTPS의 차이(TLS)](http.md#http와-https의-차이tls)
-* [클라이언트-서버 모델](http.md#클라이언트-서버-모델)
-* [stateless와 stateful](http.md#stateless와-stateful)
-* [HTTP Cookie와 HTTP Session](http.md#http-cookie와-http-session)
-  * [쿠키 설정 방법](http.md#쿠키-설정-방법)
-* [HTTP 메시지 구조](http.md#http-메시지-구조)
-  * [HTTP 요청(Reuqest)와 응답(Response)](http.md#http-요청reuqest와-응답response)
-    * [multipart/form-data](http.md#multipartform-data)
-  * [HTTP 요청 메서드(HTTP request methods)](http.md#http-요청-메서드http-request-methods)
-    * [멱등성](http.md#멱등성)
-  * [HTTP 응답 상태 코드(HTTP response status code)](http.md#http-응답-상태-코드http-response-status-code)
-    * [리다이렉션](http.md#리다이렉션)
+- [HTTP](#http)
+  - [HTTP](#http-1)
+  - [HTTP와 HTTPS의 차이(TLS)](#http와-https의-차이tls)
+  - [클라이언트-서버 모델](#클라이언트-서버-모델)
+  - [stateless와 stateful](#stateless와-stateful)
+  - [HTTP Cookie와 HTTP Session](#http-cookie와-http-session)
+    - [쿠키 설정 방법](#쿠키-설정-방법)
+  - [HTTP 메시지 구조](#http-메시지-구조)
+    - [HTTP 요청(Reuqest)와 응답(Response)](#http-요청reuqest와-응답response)
+      - [multipart/form-data](#multipartform-data)
+    - [HTTP 요청 메서드(HTTP request methods)](#http-요청-메서드http-request-methods)
+      - [멱등성](#멱등성)
+    - [HTTP 응답 상태 코드(HTTP response status code)](#http-응답-상태-코드http-response-status-code)
+      - [리다이렉션](#리다이렉션)
 
 \
 \
@@ -189,6 +190,6 @@ GET, PUT, DELETE는 멱등, POST, PATCH는 멱등을 보장하지 않는다.
 대부분의 웹 브라우저들이 302와 함께 GET으로 메서드를 바꿔버리므로 자동 리다이렉션시 GET으로 변해도 된다면 302를 사용해도 문제가 없다.
 
 출처\
-https://developer.mozilla.org/ko/docs/Web/HTTP/Cookies\
-https://www.inflearn.com/course/http-%EC%9B%B9-%EB%84%A4%ED%8A%B8%EC%9B%8C%ED%81%AC/dashboard\
-https://developer.mozilla.org/ko/docs/Web/Security/Transport\_Layer\_Security
+[모질라](https://developer.mozilla.org/ko/docs/Web/HTTP/Cookies)  
+[모질라](https://developer.mozilla.org/ko/docs/Web/Security/Transport\_Layer\_Security)  
+[인프런](https://www.inflearn.com/course/http-%EC%9B%B9-%EB%84%A4%ED%8A%B8%EC%9B%8C%ED%81%AC/dashboard)  

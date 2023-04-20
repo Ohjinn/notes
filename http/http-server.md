@@ -1,7 +1,8 @@
 # http-server
 
-* [Java ServerSocket](http-server.md#java-serversocket)
-* [Blocking vs Non-Blocking](http-server.md#blocking-vs-non-blocking)
+- [http-server](#http-server)
+  - [Java ServerSocket](#java-serversocket)
+  - [Blocking vs Non-Blocking](#blocking-vs-non-blocking)
 
 ## Java ServerSocket
 
