@@ -8,3 +8,8 @@
   * [4. JAVA\_HTTP\_Server](http/java-http-server.md)
   * [5. Spring\_Web\_MVC](http/spring-web-mvc.md)
 * [REST\_API](rest\_api.md)
+  * [1. REST_API](REST_API/REST_API.md)
+  * [2. URI&MIME_type](REST_API/URI%26MIME_type.md)
+  * [3. COLLECTION_Pattern](REST_API/Collection_Pattern.md)
+  * [4. COLLECTION_Pattern_adjustment](REST_API/Collection_Pattern_adjustment.md)
+  * [5. Spring_Web_MVC](REST_API/Spring_Web_MVC.md)
