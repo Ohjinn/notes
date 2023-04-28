@@ -1,6 +1,7 @@
 - [CORS(Cross-Origin Resource Sharing)](#corscross-origin-resource-sharing)
   - [JSONP](#jsonp)
   - [Access-Control-Allow-Origin](#access-control-allow-origin)
+  - [Preflight](#preflight)
 - [@CrossOrigin](#crossorigin)
 
 
@@ -18,13 +19,41 @@ HTTP 헤더를 보면 Origin을 명시해주는데 당장 이렇게 포트만 �
 
 
 ## JSONP
-script 태그는 동일 출처를 따지지 않는다는 점을 이용해서 서버에서 JSON을 전달하는게 아니라 실행되는 자바스크립트 코드를 전달하는 방식
+script 태그는 동일 출처를 따지지 않는다는 점을 이용해서 서버에서 JSON을 전달하는게 아니라 실행되는 자바스크립트 코드를 전달하는 방식으로 과거에나 사용됐다.
 
 ## Access-Control-Allow-Origin
+웹 브라우저가 동일 출처 정책에 예외를 방법을 제공하는데 CORS는 HTTP 응답 헤더를 이용해 이 문제를 해결할 수 있다.
 
+헤더에 다음과 같은 요소를 하나 넣어주면  
+
+```http
     HTTP/1.1 200 OK
     Access-Contorl-Allow-Origin: https://ohjinn.com
+```
 
+ohjinn.com이 origin인 자원을 모든 곳에서 사용할 수 있게 된다.
+
+## Preflight
+응답 헤더에 허용 여부가 있다면 데이터가 많이 들어간 요청이 있다면 비효율을 야기한다.  
+따라서, OPTIONS 메서드를 이용해 Preflighted Request를 보낼 수 있다.
+
+```http
+OPTIONS /resource/foo
+Access-Control-Request-Method: DELETE
+Access-Control-Request-Headers: origin, x-requested-with
+Origin: https://foo.bar.org
+```
+
+위와 같이 preflight를 이용해 간을 보면 서버에서는
+
+```http
+HTTP/1.1 204 No Content
+Connection: keep-alive
+Access-Control-Allow-Origin: https://foo.bar.org
+Access-Control-Allow-Methods: POST, GET, OPTIONS, DELETE
+Access-Control-Max-Age: 86400
+```
+이렇게 응답을 해 준다.
 
 # @CrossOrigin
 
