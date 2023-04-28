@@ -6,6 +6,7 @@
   - [무기력한 도메인 모델이란](#무기력한-도메인-모델이란)
   - [무기력한 도메인 모델의 단점](#무기력한-도메인-모델의-단점)
 - [자바빈즈(JavaBeans)](#자바빈즈javabeans)
+  - [POJO](#pojo)
 - [EJB(Enterprise JavaBeans)](#ejbenterprise-javabeans)
 - [Java의 record](#java의-record)
 - [DAO](#dao)
@@ -191,13 +192,95 @@ public class ShipmentService
 - 속성들은 get, set 혹은 표준 명명법을 따르는 메서드들을 사용해 접근할 수 있어야 한다.
 - 필요한 이벤트 처리 메서드들을 포함하고 있어야 한다.
 
+
+## POJO
+POJO란 plain old Java Object를 뜻하는 단어로 자바 언어 명세 이외의 제한을 허용하지 않는 객체를 의미한다.  
+이는 어떤 클래스의 상속, 인터페이스의 구현, 어노테이션이 존재하지 않는 것을 의미한다.
+```java
+public class Foo extends javax.servlet.http.HttpServlet { ...
+
+public class Bar implements javax.ejb.EntityBean { ...
+
+@javax.persistence.Entity public class Baz { ...
+```
+하지만 기술적 어려움으로 POJO를 주장하는 많은 라이브러리가 미리 지정된 어노테이션을 사용해야 하는데 어노테이션이 추가되기 전 객체가 POJO였다가 어노테이션이 제거되면 다시 POJO가 된다면 그건 POJO로 간주될 수 있다.
+
+자바빈은 POJO에 해당된다. 자바빈의 제약 조건들에 의해 빈의 타입을 신경쓰지 않아도 되며 많은 프레임워크에 의해 범용적으로 사용될 수 있다.
+
 # EJB(Enterprise JavaBeans)
-중간 계층 비즈니스 성능을 구현하는 서버 측 프로그램
+중간 계층 비즈니스 성능을 구현하는 서버 측 프로그램으로 어플리케이션의 비즈니스 로직을 캡슐화한다.  
+비즈니스 소프트웨어에서 전형적으로 나타나는 문제들에 대해 해결책을 제시하는 프로그램으로 Jakarta Enterprise Beans은 영속성, 트랜잭션 무결성, 보안 등의 일반적 문제를 표준 방식으로 처리해 프로그래머가 엔터프라이즈 소프트웨어의 특정 부분에만 집중할 수 있게 해줬다. 
 
 # Java의 record
+자바의 불변 객체 생성의 불편함을 덜어주기 위한 객체로 자바 14에 처음 등장했다. 여기서 [불변 객체](https://www.baeldung.com/java-immutable-object#benefits-of-immutability)란 완전히 생성된 이후로 내부 상태가 상수인 객체를 의미한다.
+
+많은 경우에서 데이터는 불변이고 불변은 데이터의 동기화 없이 데이터의 유효성을 보장한다. 이를 위해선
+- private, final을 포함한 필드들
+- 각각의 필드의 getter
+- 각 필드의 인자를 포함하는 public 생성자
+- 모든 필드가 같을 때 true를 리턴하는 equals 메서드
+- 필드가 같을 때 같은 값을 리턴하는 hashCode 메서드
+- 클래스의 이름과 각각의 필드를 포함하는 toString 메서드
+
+이 모든 것들을 보장해야 하는데 그러면 대표적으로 두 가지 문제가 있다.
+
+1. 수많은 코드의 생성
+2. 모호한 목적의 클래스들의 생성
+
+따라서 record가 존재한다.
+
+record는 불변 데이터 클래스로 필드의 타입과 이름만을 필요로 한다.
+equals, hashCode, toString 메서드와 private, final 필드, public 생성자를 자바 컴파일러가 자동으로 생성해준다.
+
+```java
+public record Person(String name, String address){}
+```
+객체 생성은 다음과 같이 해줄 수 있다.
+
+```java
+Person person = new Person("hojin jang", "100")
+```
+나머지 메서드들의 생성은 자동으로 이뤄지는데 생성자에서 커스텀도 가능하다.
+
+만약 모든 항목이 null이 아니었으면 한다면
+```java
+public record Person(String name, String address) {
+    public Person {
+        Objects.requireNonNull(name);
+        Objects.requireNonNull(address);
+    }
+}
+```
+혹은 매개변수에 따라 다른 객체를 만들고 싶다면
+```java
+public record Person(String name, String address) {
+    public Person(String name) {
+        this(name, "Unknown");
+    }
+}
+```
+
+static 키워드를 이용해 필드를 선언하거나 스태틱 메서드를 만들 수도 있다.
+```java
+public record Person(String name, String address) {
+    public static String UNKNOWN_ADDRESS = "Unknown";
+}
+
+public record Person(String name, String address) {
+    public static Person unnamed(String address) {
+        return new Person("Unnamed", address);
+    }
+}
+```
+정적 팩토리 메서드를 생성자 대신 사용한다면 javadoc에 정리를 잘 하는게 중요할 것 같다.
+[1. 생성자 대신 정적 팩터리 메서드를 고려하라](https://ohjinn.tistory.com/112)
+
 
 # DAO
+DAO란 Data Access Object의 약자로 데이터 스토리지에서 데이터를 얻고 저장하고 업데이트 하는 과정을 캡슐화하는데 주로 쓰인다.
 
 # ORM
 
 출처  
+[위키피디아](https://ko.wikipedia.org/wiki/%EC%9E%90%EB%B0%94%EB%B9%88%EC%A6%88)  
+[baeldung](https://www.baeldung.com/java-record-keyword)  
