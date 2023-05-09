@@ -1,4 +1,3 @@
-- [통합 테스트(Integration Test)](#통합-테스트integration-test)
 - [`@Autowired`](#autowired)
 - [TestRestTemplate](#testresttemplate)
 - [MockMvc](#mockmvc)
@@ -6,12 +5,6 @@
 - [MockBean](#mockbean)
 - [`@WebMvcTest`](#webmvctest)
 
-# 통합 테스트(Integration Test)
-Spring의 공식 문서는 테스트를 둘로 나눠서 설명하는데
-- Unit Testing
-- Integration Testing
-
-Spring의 힘을 빌려서 IoC 컨테이너를 사용하거나 Spring web MVC로 구현된 부분을 테스트 할 때 통합 테스트라고 부른다.
 
 # `@Autowired`
 빈의 필드주입을 위한 어노테이션. 어플리케이션 작성 시에는 생성자주입을 추천하지만 여기선 필드주입을 한다.
