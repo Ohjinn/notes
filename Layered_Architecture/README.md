@@ -1,5 +1,5 @@
 # REST API
 
-* [Layered Architecture](layered_architecture.md)
-* [Data Access](data_access.md)
-* [Domain Model](domain_model.md)
+* [Layered Architecture](Layered_Architecture.md)
+* [Data Access](Data_Access.md)
+* [Domain Model](Domain_Model.md)

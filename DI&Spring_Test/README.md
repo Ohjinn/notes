@@ -1,6 +1,6 @@
 # DI&Spring_Test
 
-* [Dependency_Injection.md](dependency_injection.md)
-* [Unit_Test](unit_test.md)
+* [Dependency_Injection](Dependency_Injection.md)
+* [Unit_Test](Unit_Rest.md)
 * [Spring_Test](Spring_Test.md)
-* [TDD](tdd.md)
+* [TDD](TDD.md)
