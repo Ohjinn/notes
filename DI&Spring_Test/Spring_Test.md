@@ -7,7 +7,7 @@
 
 
 # `@Autowired`
-빈의 필드주입을 위한 어노테이션. 어플리케이션 작성 시에는 생성자주입을 추천하지만 여기선 필드주입을 한다.
+빈의 필드주입을 위한 어노테이션. 어플리케이션 작성 시에는 생성자주입을 추천한다.
  
 
 # TestRestTemplate
@@ -81,3 +81,14 @@ class PostControllerTest {
 @SpringBootTest가 모든 빈들을 IoC 컨테이너에 넣어준다면 @WebMvcTest는 Mock은 제공하지만 그 외의 것들을 제공하지는 않는다.
 
 # `@WebMvcTest`
+Spring MVC 컴포넌트에만 초점을 맞춘 테스트로 해당 어노테이션을 사용하면 auto-configuration이 비활성화되고 MVC 테스트와 관련된 구성만 적용된다.
+@Component, @Service or @Repository beans을 제외한 
+@Controller, @ControllerAdvice, @JsonComponent, Converter/GenericConverter, Filter, WebMvcConfigurer and HandlerMethodArgumentResolver에만 적용된다.
+
+@WebMVCTest 주석을 단 테스트는 Spring Security와 MockMvc도 auto-configurate한다.
+
+전체 애플리케이션 구성을 로드하고 MockMVC를 사용하려는 경우 이 어노테이션 보다는 @SpringBootTest를 @AutoConfigureMockMvc와 결합하는 것을 고려해보자.
+
+
+출처:  
+[javadoc](https://docs.spring.io/spring-boot/docs/current/api/org/springframework/boot/test/autoconfigure/web/servlet/WebMvcTest.html)

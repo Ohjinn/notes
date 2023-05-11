@@ -35,6 +35,10 @@ V 모델은 각 단계에 대한 테스트를 나누고, 처음부터 어떻게 
 # JUnit
 자바로 작성된 프로그램의 테스트를 지원하는 도구로 이름엔 Unit이 들어있지만 유닛 테스트만 지원하는 것은 아니고 통합테스트, E2E테스트까지 지원한다.
 
+JUnit5는 자바 개발자가 가장 많이 사용하는 테스팅 프레임워크로 자바 8 이상을 필요로 한다.
+
+JUnit5 = Junit Platform + Junit Jupiter + Junit Vintage로 보면 된다.
+Platform은 테스트를 실행해주는 TestEngine API 을 제공해주고 Jupiter는 TestEngine API 구현체로 JUnit5를 제공해준다. Vintage는 Junit4와 3를 지원하는 TestEngine 구현체다.
 
 # 테스트
 ![테스트](https://martinfowler.com/articles/practical-test-pyramid/testPyramid.png)  
