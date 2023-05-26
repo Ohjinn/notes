@@ -1,4 +1,5 @@
 - [Relationship Mapping](#relationship-mapping)
+  - [단방향 연관관계](#단방향-연관관계)
 - [DDD의 Aggregate](#ddd의-aggregate)
 - [CascadeType.ALL](#cascadetypeall)
 - [orphanRemoval](#orphanremoval)
@@ -12,8 +13,16 @@
 
 일정 규모 이상의 시스템이라면 Command와 Query를 구분해서 전자는 JPA Entity와 Relationship Mapping을 활용하고 후자는 JdbcTemplate같은 매퍼를 활용하는 방식이 추천된다.
 
+엔티티들은 대부분 다른 엔티티와 연관관계가 있는데 연관관계의 키워드는 다음과 같다.
+- 방향: 단방향, 양방향이 있다. 어떤 한 관계에서 둘 중 한쪽만 참조하는 것을 단방향 관계라 하고, 양쪽 모두 서로 참조하는 것을 양방향 관계라 한다. 방향은 객체관계에만 존재하고 테이블 관계는 항상 양방향이다
+- 다중성: N:1, 1:N, 1:1 다중성이 있다. 회원과 팀이 있을 때 여러 회원은 한 팀에 속하므로 회원과 팀은 다대일 관계다.
+- 연관관계의 주인: 객체를 양방향 연관관계로 만들면 연관관계의 주인을 정해야 한다.
 
-
+## 단방향 연관관계
+예를 들어
+- 회원과 팀이 존재하고 
+- 회원은 하나의 팀에만 소속될 수 있고
+- 회원과 팀은 다대일관계이다.
 # DDD의 Aggregate
 
 # CascadeType.ALL
