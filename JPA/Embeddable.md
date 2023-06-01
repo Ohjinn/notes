@@ -1,6 +1,6 @@
 - [Aggregate Mapping](#aggregate-mapping)
 - [Value Object](#value-object)
-- [JPA annotations](#jpa-annotations)
+- [값 타입](#값-타입)
   - [@Entity](#entity)
     - [속성](#속성)
   - [@Table](#table)
@@ -65,7 +65,61 @@ Person person = new Person("Mr.Big", 35, Gender.male());
 
 # Value Object
 
-# JPA annotations
+# 값 타입
+JPA의 데이터 타입은 엔티티 타입과 값 타입으로 나눌 수 있는데 엔티티 타입은 @Entity로 정의하는 객체이고 값 타입은 int, Integer, String처럼 단순히 값으로 사용하는 자바 기본 타입이나 객체를 말한다. 엔티티 타입은 식별자를 통해 추적 가능하지만 값 타입은 식별자가 없고 숫자나 문가탕느 속성만 있어 추적할 수 없다.
+
+값 타입은 3가지로 나눌 수 있다.
+- 기본값 타입
+  - 자바 기본 타입(int, double)
+  - 래퍼 클래스(Integer)
+  - String
+  ```java
+  @Entity
+  public class Member {
+    @Id @GeneratedValue
+    private Long id;
+
+    private String name;
+
+    private int age;
+  }
+  ```
+- 임베디드 타입(복합 값 타입)  
+  새로운 값 타입을 직접 정의해서 사용할 수 있는데 이것을 임베디드 타입이라 한다.
+  ```java
+  @Entity
+  public class Member {
+    @Id @GeneratedValue
+    private Long id;
+    private String name;
+
+    @Embedded Period workPeriod;
+
+    @Embedded Address homeAddress;
+  }
+
+  @Embeddable
+  public class Period {
+
+    @Temporal(TemporalType.DATE) java.util.Date startDate;
+    @Temporal(TemporalType.DATE) java.util.Date endDate;
+  }
+
+  @Embeddable
+  public class Address {
+
+    @Column(name="city")
+    private String city;
+    private String street;
+    private String zipcode;
+  }
+  ```
+
+  - 임베디드 타입은 기본 생성자가 필수다
+  - 임베디드 타입을 사용하기 전과 후에 매핑하는 테이블은 같다
+- 컬렉션 값 타입
+
+
 
 ## @Entity
 JPA를 사용해서 테이블과 매핑할 클래스는 @Entity 어노테이션을 필수로 붙여야 한다.
