@@ -43,3 +43,7 @@
   * [3. Entity, Value Object](도메인_주도_설계/Entity_Value_Object.md)
   * [4. Aggregate](도메인_주도_설계/Aggregate.md)
   * [5. Repository](도메인_주도_설계/Repository.md)
+* [Hexagonal_Architecture](Hexagonal_Architecture/README.md)
+  * [1. SOLID](Hexagonal_Architecture/SOLID.md)
+  * [2. Hexagonal_Architecture](Hexagonal_Architecture/Hexagonal_Architecture.md)
+  * [3. 도메인 주도 설계 핵심](Hexagonal_Architecture/%EB%8F%84%EB%A9%94%EC%9D%B8_%EC%A3%BC%EB%8F%84_%EC%84%A4%EA%B3%84_%ED%95%B5%EC%8B%AC.md)
