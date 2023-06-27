@@ -57,3 +57,6 @@
   * [1. Multipart_FormData](File_Upload/Multipart_FormData.md)
   * [2. Separation_of_Concerns](File_Upload/Separation_of_Concerns.md)
   * [3. Cloudinary](File_Upload/Cloudinary.md)
+* [CQRS](CQRS/README.md)
+  * [1. CQRS](CQRS/CQRS.md)
+  * [2. Redis](CQRS/Redis.md)
