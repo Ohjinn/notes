@@ -2,8 +2,8 @@
 
 * [노트의목적](README.md)
 * [웹전반](web/README.md)
-  * [HTTP](http/README.md)
-    * [1. HTTP](http/http.md)
+  * [HTTP](web/http/README.md)
+    * [1. HTTP](web/http/http.md)
     * [2. HTTP\_Client](http/http-client.md)
     * [3. HTTP\_Server](http/http-server.md)
     * [4. JAVA\_HTTP\_Server](http/java-http-server.md)
