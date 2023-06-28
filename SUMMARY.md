@@ -1,7 +1,7 @@
 # Table of contents
 
 * [노트의목적](README.md)
-* [웹전반](웹전반/README.md)
+* [웹전반](web/README.md)
   * [HTTP](http/README.md)
     * [1. HTTP](http/http.md)
     * [2. HTTP\_Client](http/http-client.md)
