@@ -9,6 +9,7 @@ Aggregate는 불변식을 유지하고 여러 도메인 객체를 사용하기 �
 # 불변식
 우리가 지켜야 할 제약 조건, 규칙이라고 할 수 있다. Order로 예를 들어보자.
 
+```
 Order
     - Identifier: order-123
     - List<LineItem>
@@ -24,6 +25,7 @@ Order
         - Quantity: 3
         - Unit Price: 20만원
         - Total Price: 60만원
+```
 
 만약 개별 Line Item에 직접 접근 가능하고 동시에 여러 처리를 할 수 있다면 총 주문액이 조건을 넘어도 체크할 수 없다. 하지만 Order라는 Entity를 Order라는 Aggregate의 Root로 삼고 하나의 객체에 동시에 접근할 수 없다는 제어를 통해 불변식을 지킬 수 있게 된다.
 
