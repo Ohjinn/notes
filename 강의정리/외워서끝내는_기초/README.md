@@ -11,6 +11,9 @@
 - [Encapsulation, Decapsulation](#encapsulation-decapsulation)
 - [패킷의 생성과 전달](#패킷의-생성과-전달)
   - [계층별 데이터 단위](#계층별-데이터-단위)
+- [IP 헤더 형식](#ip-헤더-형식)
+- [subnet mask와 CIDRß](#subnet-mask와-cidrß)
+  - [Private Network(사설망)](#private-network사설망)
 
 Network: 관계  
 Networking: 상호작용
@@ -137,7 +140,19 @@ FF-FF-FF-FF-FF-FF의 16진수 주소다.
 
 stream은 데이터의 크기가 정해져있지 않은 데이터의 연속이지만 인터넷 상에서 대용량 데이터를 한번에 전송할 수는 없기 때문에 segment의 이름과 같이 데이터를 댕강댕강 자르게 되는데 그 최대 길이가 위에서 말했던 MTU(1500byte)가 된다.
 
+# IP 헤더 형식
+IPv4 헤더 형식은 다음과 같다.
 
+
+# subnet mask와 CIDRß
+
+
+## Private Network(사설망)
+- 하나의 pubilc IP를 여러 기기가 공유할 수 있는 방법
+- 하나의 망에는 private IP를 부여받은 기기들과 gateway로 구성
+  - 각 기기는 인터넷과 통신시 gateway를 통해 통신
+- private IP는 지정된 대역의 IP만 사용 가능
 
 segment
-출처: [외워서 끝내는 네트워크 핵심이론 - 기초](https://www.inflearn.com/course/%EB%84%A4%ED%8A%B8%EC%9B%8C%ED%81%AC-%ED%95%B5%EC%8B%AC%EC%9D%B4%EB%A1%A0-%EA%B8%B0%EC%B4%88/dashboard)
+
+출처: [외워서 끝내는 네트워크 핵심이론 - 기초](https://www.inflearn.com/course/%EB%84%A4%ED%8A%B8%EC%9B%8C%ED%81%AC-%EDs%95%B5%EC%8B%AC%EC%9D%B4%EB%A1%A0-%EA%B8%B0%EC%B4%88/dashboard)
