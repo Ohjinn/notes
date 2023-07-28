@@ -279,16 +279,6 @@ calculateDiscountAmount 메서드는 isSatisfiedBy 메서드를 실행시키고 
 부모 클래스에 기본적인 알고리즘 흐름을 구현하고 중간에 필요한 처리를 자식 클래스에게 위임하는 디자인 패턴을 `Template Method` 패턴이라고 부른다.
 
 <details>
-<summary>DiscountCondition interface</summary>
-
-```java
-  public interface DiscountCondition {
-      boolean isSatisfiedBy(Screening screening);
-  }
-```
-</details>
-
-<details>
 <summary>AmountDiscountPolicy</summary>
 
 ```java
@@ -325,6 +315,16 @@ public class AmountDiscountPolicy extends DiscountPolicy{
         return discountAmount;
     }
 }
+```
+</details>
+
+<details>
+<summary>DiscountCondition interface</summary>
+
+```java
+  public interface DiscountCondition {
+      boolean isSatisfiedBy(Screening screening);
+  }
 ```
 </details>
 
