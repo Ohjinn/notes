@@ -65,6 +65,7 @@
 * [책](책)
   * [RealMySQL8.0](책/RealMySQL8.0)
     * [4장](책/RealMySQL8.0/4%EC%9E%A5_%EC%95%84%ED%82%A4%ED%85%8D%EC%B3%90.md)
+    * [5장](책/RealMySQL8.0/5장_트랜잭션과_잠금.md)
   * [Object](책/Object)
     * [1장](책/Object/ch1.md)
     * [2장](책/Object/ch2.md)
