@@ -12,7 +12,8 @@
 - [패킷의 생성과 전달](#패킷의-생성과-전달)
   - [계층별 데이터 단위](#계층별-데이터-단위)
 - [IP 헤더 형식](#ip-헤더-형식)
-- [subnet mask와 CIDRß](#subnet-mask와-cidrß)
+- [subnet mask와 CIDR](#subnet-mask와-cidr)
+  - [CIDR(classless Inter-Domain Routing)](#cidrclassless-inter-domain-routing)
   - [Private Network(사설망)](#private-network사설망)
 
 Network: 관계  
@@ -144,7 +145,20 @@ stream은 데이터의 크기가 정해져있지 않은 데이터의 연속이�
 IPv4 헤더 형식은 다음과 같다.
 
 
-# subnet mask와 CIDRß
+# subnet mask와 CIDR
+subnet mask를 기준으로 NetworkID와 HostID를 잘라낸다.
+
+mask 연산: 주소에서 subnet mask를 기준으로 bit별로 AND 연산을 한다. 만약 AND 연산이 나의 IP와 같으면 유입 패킷으로 식별한다.  
+
+과거에는 IP 주소별로 A, B, C클래스로 나눠 구분했기 때문에 이런 방법을 썼었다. 지금은 쓰지 않는다.
+
+이제는 CIDR 방식을 쓴다.
+
+## CIDR(classless Inter-Domain Routing)
+CIDR은 IP 주소에서 어느 비트까지를 IP 주소라고 간주할지 선택하는 방법으로
+
+**192.168.0.10/24**
+다음과 같은 주소가 존재한다면 24비트까지를 IP주소로 본다.
 
 
 ## Private Network(사설망)

@@ -66,6 +66,7 @@
   * [RealMySQL8.0](book/RealMySQL8.0)
     * [4장](book/RealMySQL8.0/4%EC%9E%A5_%EC%95%84%ED%82%A4%ED%85%8D%EC%B3%90.md)
     * [5장](book/RealMySQL8.0/5장_트랜잭션과_잠금.md)
+    * [8장](book/RealMySQL8.0/8장_인덱스.md)
   * [Object](book/Object)
     * [1장](book/Object/ch1.md)
     * [2장](book/Object/ch2.md)
