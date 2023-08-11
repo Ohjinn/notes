@@ -15,6 +15,12 @@
 - [subnet mask와 CIDR](#subnet-mask와-cidr)
   - [CIDR(classless Inter-Domain Routing)](#cidrclassless-inter-domain-routing)
   - [Private Network(사설망)](#private-network사설망)
+- [Broadcast IP 주소](#broadcast-ip-주소)
+- [Host 자신을 가리키는 IP주소](#host-자신을-가리키는-ip주소)
+- [인터넷은 라우터의 집합체라고 할 수 있는 논리 네트워크이다.](#인터넷은-라우터의-집합체라고-할-수-있는-논리-네트워크이다)
+  - [TTL과 단편화](#ttl과-단편화)
+- [인터넷 사용 전 해야 할 설정](#인터넷-사용-전-해야-할-설정)
+  - [DHCP(Dynamic Host Configuration Protocol)](#dhcpdynamic-host-configuration-protocol)
 
 Network: 관계  
 Networking: 상호작용
@@ -92,12 +98,12 @@ switch와 router가 연결되어 있는 선은 uplink라고 부름
 
 - Broadcast <=> Unicast
 
-- Braodcast는 효율과는 상관 없다. 다만 속도를 위해서는 Broadcast의 범위를 최소화해야한다.
+- Broadcast는 효율과는 상관 없다. 다만 속도를 위해서는 Broadcast의 범위를 최소화해야한다.
 
 NIC는 MAC address를 갖는데 이는 48비트 주소로  
 FF-FF-FF-FF-FF-FF의 16진수 주소다.
 
-위의 예는 1111-1111-1111-1111-1111-1111의 2진수 주소로 변환될 수 있는데 송신자가 수신자를 다음과 같이 설정하면 모두가 메시지를 받으라는 뜻이고 Braodcast라고 불린다.
+위의 예는 1111-1111-1111-1111-1111-1111의 2진수 주소로 변환될 수 있는데 송신자가 수신자를 다음과 같이 설정하면 모두가 메시지를 받으라는 뜻이고 Broadcast라고 불린다.
 
 
 # IPv4 주소의 구조
@@ -143,7 +149,7 @@ stream은 데이터의 크기가 정해져있지 않은 데이터의 연속이�
 
 # IP 헤더 형식
 IPv4 헤더 형식은 다음과 같다.
-
+![IPv4 Header](images/IPv4_Header.png)
 
 # subnet mask와 CIDR
 subnet mask를 기준으로 NetworkID와 HostID를 잘라낸다.
@@ -168,5 +174,65 @@ CIDR은 IP 주소에서 어느 비트까지를 IP 주소라고 간주할지 선�
 - private IP는 지정된 대역의 IP만 사용 가능
 
 segment
+
+# Broadcast IP 주소
+MAC 주소에서 만약 수신자가 FF-FF-FF-FF-FF-FF라면 모든 수신자가 받으라는 Broadcast였다.
+
+IP주소에서도 똑같다.
+![IP Broadcast](images/IP_Broadcast.png)  
+만약 Host명이 1111-1111라면 해당 IP주소를 쓰는 네트워크에서 쓰이는 방송주소가 된다.
+
+Broadcast는 자주 쓰이면 효율이 떨어지기 때문에 최소화해야한다.
+
+따라서 네트워크에서 쓰일 수 없는 호스트는 다음과 같다.
+1. 0: 서브넷 마스크 결과와 동일해지기 때문에 쓸 수 없다.
+2. 1: gateway
+3. 255: 브로드캐스트이기 때문에 쓸 수 없다.
+따라서 253개의 호스트 주소만 쓸 수 있는데 추가적으로 스위치에 부여하게 되면 더 줄어들 여지가 있다.
+
+# Host 자신을 가리키는 IP주소
+
+하나의 컴퓨터에서 프로세스간 통신이 필요할 때 사용하는 IP 주소로
+
+127.0.0.1: Loopback address라고 한다.
+
+![loopback_address](images/loopback_address.png)
+
+다음과 같이 통신하려고 할 때는 127.0.0.1을 쓰면 된다.
+
+# 인터넷은 라우터의 집합체라고 할 수 있는 논리 네트워크이다.
+
+기본적으로 물리적 스위치로 이뤄지지만 논리적인 형태로 구성되는 네트워크다.
+
+**Internet = Router + DNS**
+
+## TTL과 단편화
+- TTL(Time to Live)는 세포의 텔로미어 같은 역할을 한다.
+  - 좀비 패킷을 막기 위한 장치다.
+  - 라우터와 라우터 사이를 지날때(Hop이라고 한다) 하나씩 줄어든다.
+- 단편화는 MTU 크기 차이로 발생한다.
+  - 보편 값은 1500Byte지만 만약 크기가 작은 라우터가 존재한다면 수신을 하지 못하고 패킷이 유실된다.
+  - 보내기 전 라우터에서 하나의 패킷을 두 개로 나누고 서버측에서 재조립하게된다.
+  - VPN이 적용됐을 때 단편화가 발생할 확률이 높아진다.
+- 보통 단편의 조립은 수신측 Host에서 이루어진다.
+
+# 인터넷 사용 전 해야 할 설정
+
+- IP 주소
+  - 보통 ISP(Internet Service Provider)에서 돈을 내면 할당해준다.
+- Subnet mask
+- Gateway IP 주소
+- DNS 주소
+
+보통 자동 설정을 이용하게 된다. -> DHCP 설정을 이용하게 된다.
+
+## DHCP(Dynamic Host Configuration Protocol)
+- 주소를 할당하는 서버와 할당 받으려는 클라이언트로 구성된다.
+- 복잡한 인터넷 설정을 자동으로 해준다고 볼 수 있는데 내가 사용할 IP주소를 서버가 알려준다.
+
+1. 만약 한 컴퓨터가 켜지면 Broadcast 트래픽을 송신한다.
+2. DHCP 서버가 해당 요청에 응답한다.
+3. 보통 사용하던 주소를 재할당한다.
+4. DHCP서버는 Broadcast 도메인을 넘어 구성될 수는 없다.
 
 출처: [외워서 끝내는 네트워크 핵심이론 - 기초](https://www.inflearn.com/course/%EB%84%A4%ED%8A%B8%EC%9B%8C%ED%81%AC-%EDs%95%B5%EC%8B%AC%EC%9D%B4%EB%A1%A0-%EA%B8%B0%EC%B4%88/dashboard)

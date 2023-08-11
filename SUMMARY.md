@@ -74,3 +74,6 @@
   * [ModernJava](book/ModernJava)
     * [ch1](book/ModernJava/ch1.md)
     * [ch2](book/ModernJava/ch2.md)
+* [lecture](lecture)
+  * [외워서끝내는네트워크기초](lecture/network_basic/README.md)
+  * [외워서끝내는네트워크심화](lecture/network_adv//README.md)
