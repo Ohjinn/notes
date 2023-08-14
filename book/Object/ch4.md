@@ -531,7 +531,7 @@ public class Screening {
 
 Screening은 Movie가 할인 정책을 지원할 경우 Movie의 isDiscountable을 호출해 할인 가능 여부를 판단한 후 요금을 계산한다.
 
-![improved architecture](images/4-2.png)
+![improved architecture](Images/4-2.png)
 
 이 객체들은 스스로를 책임진다.
 
