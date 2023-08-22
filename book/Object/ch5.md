@@ -6,7 +6,7 @@
     - [도메인 개념에서 출발](#도메인-개념에서-출발)
     - [INFORMATION EXPERT패턴(정보 전문가에게 책임을 할당하라)](#information-expert패턴정보-전문가에게-책임을-할당하라)
     - [LOW COUPLING과 HIGH COHESION](#low-coupling과-high-cohesion)
-    - [CREATER패턴](#creater패턴)
+    - [CREATER패턴(창조자에게 객체 생성 책임을 할당하라.)](#creater패턴창조자에게-객체-생성-책임을-할당하라)
   - [구현을 통한 검증](#구현을-통한-검증)
     - [POLYMORPHISM패턴(다형성을 통해 분리하기)](#polymorphism패턴다형성을-통해-분리하기)
     - [Movie 클래스 개선하기](#movie-클래스-개선하기)
@@ -78,7 +78,7 @@ GRASP에서는 LOW COUPLING(낮은 결합도)패턴과 HIGH COHESION(높은 응�
 
 Screening의 가장 중요한 책임은 예매를 생성하는 것인데 Screening이 DiscountCondition과 협력해야 한다면 Screening은 영화 요금 계산 책임 일부를 떠안아야 한다. 요금 계산 방식이 변경될 경우 Screening도 함께 변경되게 된다. 따라서 HIGH COHESION 관점에서도 Movie가 DiscountCondition과 협력하는 것이 더 나은 설계 대안이다.
 
-### CREATER패턴
+### CREATER패턴(창조자에게 객체 생성 책임을 할당하라.)
 영화 예매 협력의 최종 결과물은 Reservation 인스턴스를 생성하는 것인데 협력을 참여하는 어떤 객체에게는 Reservation 인스턴스를 생성할 책임을 할당해야 한다. GRASP의 CREATER(창조자) 패턴은 이 같은 경우에 사용할 수 있는 책임 할당 패턴으로 객체를 생성할 책임을 어떤 객체에게 할당할지에 대한 지침을 제공한다.
 
 ```markdown
