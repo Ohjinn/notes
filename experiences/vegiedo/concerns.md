@@ -3,6 +3,7 @@
   - [공통 개발환경 구상](#공통-개발환경-구상)
   - [협업을 위한 API 명세서 작성](#협업을-위한-api-명세서-작성)
 - [2. 양방향 연관관계에서 주인에 값을 입력하지 않으면 데이터베이스에 외래키가 반영되지 않는다.](#2-양방향-연관관계에서-주인에-값을-입력하지-않으면-데이터베이스에-외래키가-반영되지-않는다)
+- [3. queryDsl의 from절 서브쿼리 미지원 문제](#3-querydsl의-from절-서브쿼리-미지원-문제)
 
 # 1. 프로젝트 세팅
 
@@ -100,3 +101,97 @@ JAVA 17, MySQL8.0.3 버전을 사용하며 데이터베이스와 어플리케이
 API 명세서는 SPRING REST DOCS를 이용해 구성하기로 했지만 개발이 진행 된 후 테스트 코드 작성 후에야 가능한 조건이었기 때문에 notion 협업 페이지에 API 명세서를 작성했습니다.
 
 # 2. 양방향 연관관계에서 주인에 값을 입력하지 않으면 데이터베이스에 외래키가 반영되지 않는다.
+
+
+# 3. queryDsl의 from절 서브쿼리 미지원 문제
+
+```sql
+@Override
+public List<StoreSummaryConvertingDto> searchWithoutStampBook(Long userId, String keyword, Set<TagOption> options, Location start, Location end, Pageable pageable) {
+    return queryFactory
+            .select(Projections.constructor(StoreSummaryConvertingDto.class,
+                    store.id,
+                    store.storeName,
+                    store.address,
+                    store.location.latitude,
+                    store.location.longitude,
+                    Expressions.asNumber(1),
+                    store.stars,
+                    JPAExpressions
+                            .select(Expressions.stringTemplate("GROUP_CONCAT({0})", storeTag.tagName))
+                            .from(storeTag)
+                            .where(store.id.eq(storeTag.store.id)),
+                    new CaseBuilder()
+                            .when(storeLike.id.isNull()).then(false)
+                            .otherwise(true),
+                    new CaseBuilder()
+                            .when(stamp.id.isNull()).then(false)
+                            .otherwise(true),
+                    JPAExpressions
+                            .select(storeReview.count())
+                            .from(storeReview)
+                            .where(storeReview.store.id.eq(store.id)),
+                    storeImage.url
+            ))
+            .from(store)
+            .leftJoin(storeLike)
+            .on(storeLike.user.id.eq(userId))
+            .leftJoin(stamp)
+            .on(stamp.user.id.eq(userId))
+            .innerJoin(storeTag)
+            .on(store.id.eq(storeTag.store.id))
+            .leftJoin(storeImage)
+            .on(storeImage.id.eq(store.images.id))
+            .where(keywordStartWith(keyword),
+                    store.deleteAt.isNull(),
+                    store.location.latitude.between(start.latitude(), end.latitude()),
+                    store.location.longitude.between(start.longitude(), end.longitude()))
+            .offset(pageable.getOffset())
+            .limit(pageable.getPageSize())
+            .fetch();
+    }
+
+```
+
+4. docker로 테스트 서버 배포시 메모리 부족 문제
+
+swap memory를 통해 해결
+
+```linux
+sudo dd if=/dev/zero of=/swapfile bs=128M count=16
+```
+128M * 16으로 2GB로 swapfile 메모리 할당
+
+```linux
+sudo chmod 600 /swapfile
+```
+
+swapfile에 접근 권한 설정
+
+```linux
+sudo mkswap /swapfile
+```
+mkswap  명령어로 swapfile을 추가할 swap 공간 생성
+
+```linux
+sudo swapon /swapfile
+```
+swap 공간에 swapfile 추가
+
+```linux
+sudo vi /etc/fstab
+
+/swapfile swap swap defaults 0 0
+```
+
+fstab 수정, 파일시스템 변경사항 저장
+
+![메모리](images/free.png)
+
+![디스크](images/df-h.png)
+
+4. 테스트 환경 구축
+5. API 문서
+6. 조회쿼리
+쿼리 테스트 해보기
+인덱스도 추가 할 수 있다.
