@@ -75,6 +75,7 @@
     * [4장](book/Object/ch4.md)
     * [5장](book/Object/ch5.md)
     * [6장](book/Object/ch6.md)
+    * [7장](book/Object/ch7.md)
   * [ModernJava](book/modernjava/README.md)
     * [ch1](book/ModernJava/ch1.md)
     * [ch2](book/ModernJava/ch2.md)

@@ -195,3 +195,12 @@ fstab 수정, 파일시스템 변경사항 저장
 6. 조회쿼리
 쿼리 테스트 해보기
 인덱스도 추가 할 수 있다.
+
+7. JPA 연관관계 설정
+
+@OneToMany(mappedBy = "storeReview", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+private List<StoreReviewImage> images = new ArrayList<>();
+
+착오로 위와 같이 설정했을 때 외래키가 두 개 생기는 일이 있었다.
+
+이유를 모르겠네
