@@ -211,3 +211,72 @@ private List<StoreReviewImage> images = new ArrayList<>();
 웹 서버: 웹 서비스를 사용할 수 있게 도와주는 공통규약을 사용하는 서버
 Apacheㅣ 1996년 출시된 오픈소스 웹서버로 엔진엑스에 비해 다양한 기능이 있어 비교적 느리다.
 
+```shell
+FROM nginx
+
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY fullchain.pem /etc/letsencrypt/live/vegiedo.xyz/fullchain.pem
+COPY privkey.pem /etc/letsencrypt/live/vegiedo.xyz/privkey.pem
+```
+
+다음과 같이 Dockerfile을 구축하고
+
+```shell
+events {}
+
+http {
+  upstream app {
+    server 3.38.23.253:8080;
+  }
+
+  server {
+    listen 80;
+    server_name vegiedo.xyz;
+    location / {
+	    rewrite ^ https://$server_name$request_uri? permanent;
+    }
+  }
+  server {
+    listen 443 ssl;
+    ssl_certificate /etc/letsencrypt/live/vegiedo.xyz/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/vegiedo.xyz/privkey.pem;
+
+    # Disable SSL
+    ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+
+    # 통신과정에서 사용할 암호화 알고리즘
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDH+AESGCM:ECDH+AES256:ECDH+AES128:DH+3DES:!ADH:!AECDH:!MD5;
+
+    # Enable HSTS
+    # client의 browser에게 http로 어떠한 것도 load 하지 말라고 규제.
+    # 이를 통해 http에서 https로 redirect 되는 request를 minimize 할 수 있다.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # SSL sessions
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    location / {
+      proxy_pass http://app;
+    }
+  }
+}
+```
+nginx.conf 파일을 이렇게 가져갔다.
+
+ssl_certificate 부분에서 PEM키를 인식하지 못해서 지속적으로 오류가 났다.
+
+해당 오류에 대해선 구글링해도 해법이 없었다. 이틀가량 쓴 것 같은데 Docker가 pem 파일을 복사할 때 문제가 있지 않나 하는생각이 든다.
+
+[emerg] 1#1: cannot load certificate key "/etc/letsencrypt/live/vegiedo.xyz/privkey.pem": PEM_read_bio_PrivateKey() failed (SSL: error:1E08010C:DECODER routines::unsupported:No supported data to decode. Input type: PEM)
+nginx: [emerg] cannot load certificate key "/etc/letsencrypt/live/vegiedo.xyz/privkey.pem": PEM_read_bio_PrivateKey() failed (SSL: error:1E08010C:DECODER routines::unsupported:No supported data to decode. Input type: PEM)
+root@ip-172-31-13-198:/home/ubuntu/TLS# client_loop: send disconnect: Broken pipe
+
+다음과 같은 에러가 떴다.
+
+결국 그냥 docker-compose 파일을 만들어서 해결했다.
+
+9. 리버스 프록시와 캐싱
+
+메인페이지 등 사용자의 환경
