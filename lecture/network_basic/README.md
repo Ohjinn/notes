@@ -194,7 +194,9 @@ segment
 MAC 주소에서 만약 수신자가 FF-FF-FF-FF-FF-FF라면 모든 수신자가 받으라는 Broadcast였다.
 
 IP주소에서도 똑같다.
+
 ![IP Broadcast](images/IP_Broadcast.png)  
+
 만약 Host명이 1111-1111라면 해당 IP주소를 쓰는 네트워크에서 쓰이는 방송주소가 된다.
 
 Broadcast는 자주 쓰이면 효율이 떨어지기 때문에 최소화해야한다.
