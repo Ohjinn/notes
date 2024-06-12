@@ -84,6 +84,7 @@
   * [클라우드네이티브를위한 쿠버네티스 실전 프로젝트](book/EKS)
     * [1장](book/EKS/1장.md)
     * [2장](book/EKS/2장.md)
+    * [3장](book/EKS/3장.md)
 * [lecture](lecture/README.md)
   * [외워서끝내는네트워크기초](lecture/network\_basic/README.md)
   * [외워서끝내는네트워크심화](lecture/network\_adv/README.md)
