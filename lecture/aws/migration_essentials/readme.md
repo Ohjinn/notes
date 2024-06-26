@@ -111,4 +111,14 @@ Control Tower라는 랜딩존을 자동으로 설정하는데 사용할 수 있�
 AWS로의 애플리케이션 Lift and Shift Migration에 권장되는 기본 마이그레이션 서비스
 
 ![application_migration_service](images/application_migration_service.png)
-ㅌ₩ㅌ
+
+
+
+
+
+
+
+
+
+
+

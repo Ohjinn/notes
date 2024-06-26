@@ -80,11 +80,12 @@
   - [Amazon CloudFront](#amazon-cloudfront)
   - [DDoS 보호](#ddos-보호)
     - [AWS Shield](#aws-shield)
+    - [AWS Firewall Manager](#aws-firewall-manager)
     - [AWS Outposts](#aws-outposts)
 - [백업 및 복구](#백업-및-복구)
   - [복구전략](#복구전략)
     - [백업 및 복원](#백업-및-복원)
-    - [파일럿 라이트](#파일럿-라이트)
+    - [파일럿 라이트(부싯돌)](#파일럿-라이트부싯돌)
     - [웜 스탠바이](#웜-스탠바이)
     - [다중 사이트 액티브-액티브](#다중-사이트-액티브-액티브)
 
@@ -419,19 +420,19 @@ ex) EC2 인스턴스, EBS볼륨, RDS 인스턴스
 
 ## CloudTrail
 사용자 활동 및 API 사용량을 추적해 누가 무엇을 언제 했는가에 대한 인사이트를 제공한다.
-![vpc_flow_log](images/cloud_trail.png)
+![cloud_trail](images/cloud_trail.png)
 
 ## VPC 흐름 로그
-![alt text](images/vpc_flow_log.png)
+![vpc_flow_log](images/vpc_flow_log.png)
 
 
 ## Cloudwatch 경보
-![alt text](images/cloudwatch_alert.png)
+![cloudwatch_alert](images/cloudwatch_alert.png)
 
 ## EventBridge
 Cloudwatch Events의 기본 서비스에 추가적 기능들이 제공된다.
 
-![alt text](image/eventbridge.png)
+![eventbridge](images/eventbridge.png)
 
 
 ## ELB 유형
@@ -527,11 +528,11 @@ ECMP(equal-cost multipath): 같은 목적지를 갖는 패킷들을 다수의 �
 특수 계약을 체결해 데이터센터에 물리적 케이블을 연결해야 한다.
 
 # 서버리스
-![alt text](images/serverless.png)
+![serverless](images/serverless.png)
 
 포트폴리오
 
-![alt text](images/serverless_portpolio.png)
+![serverless_portpolio](images/serverless_portpolio.png)
 
 ## API Gateway
 API 생성, 게시, 유지관리, 모니터링 및 보호 기능을 할 수 있다.
@@ -626,30 +627,41 @@ SQS 대기열 사용 시 이점
 
 ![aws_waf](images/aws_waf.png)
 
+### AWS Firewall Manager
+여러 WAF를 orchestration하는 도구
+![aws_firewall_manager](images/aws_firewall_manager.png)
 
 ### AWS Outposts
-AWS의 서버 렉을 데이터센트로 전달해주는 서비스
+AWS의 서버 렉을 데이터센터로 전달해주는 서비스
 
 
 # 백업 및 복구
 ![rpo_rto](images/rpo_rto.png)
 
+RTO: 가동 중단 시간 최소화를 위한 설정  
+RPO: 데이터 손실 최소화, 0이 가장 이상적
+
 ## 복구전략
 
 ### 백업 및 복원
 다운시 백업을 기반으로 복원하는 방법으로 가동 중단 발생 시 시스템 복원에 많은 시간이 걸린다.
+환경 구축, 데이터 복구하는 시간이 전부 RTO 시간이 된다.
 
+![backup_recover](images/backup_recover.png)
 
-### 파일럿 라이트
-환경 간에 데이터를 복제하고 핵심 워크로드 인프라의 복사본을 프로비저닝한다.
-![alt text](images/pilot.png)
+### 파일럿 라이트(부싯돌)
+환경 간에 데이터를 복제하고 핵심 워크로드 인프라의 복사본을 프로비저닝한다. CDC 등을 이용해서 RTO와 RPO를 줄일 수 있다.
+
+![pilot](images/pilot.png)
 
 ### 웜 스탠바이
 정상 작동하는 축소된 프로덕션 환경 사본을 복구 환경에 생성하고 비즈니스 크리티컬한 시스템을 복제하고 상시 접속되도록 한다.
 
-![alt text](images/warm_standby.png)
+![warm_standby](images/warm_standby.png)
 
 리소스의 시작까지 기다리지 않아도 되므로 복구 시간이 단축된다.
+
+UMS
 
 ### 다중 사이트 액티브-액티브
 
