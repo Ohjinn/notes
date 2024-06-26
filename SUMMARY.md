@@ -85,6 +85,7 @@
     * [1장](book/EKS/1장.md)
     * [2장](book/EKS/2장.md)
     * [3장](book/EKS/3장.md)
+    * [4장](book/EKS/4장.md)
 * [lecture](lecture/README.md)
   * [외워서끝내는네트워크기초](lecture/network\_basic/README.md)
   * [외워서끝내는네트워크심화](lecture/network\_adv/README.md)
