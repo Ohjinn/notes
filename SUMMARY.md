@@ -93,6 +93,8 @@
     * [Architecting_on_AWS](lecture/aws/Architecting_on_AWS/readme.md)
     * [Architecrting-advanced](lecture/aws/Architecrting-advanced/readme.md)
   * [Ansible](lecture/ansible을이용한자동화/readme.md)
+  * [k8s](lecture/k8s)
+    * [section2](lecture/k8s/section2/section2.md)
 * [experiences](experiences)
   * [workshops](experiences/workshops)
     * [EKS](experiences/workshops/EKS.md)
