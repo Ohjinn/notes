@@ -17,6 +17,18 @@
 - [Replication Controller](#replication-controller-1)
 - [문제풀이2](#문제풀이2)
 - [Deployments](#deployments)
+- [Service](#service)
+  - [NodePort](#nodeport)
+  - [clusterIP](#clusterip)
+  - [LoadBalancer](#loadbalancer)
+- [문제풀이3](#문제풀이3)
+- [namespace](#namespace)
+- [문제풀이4](#문제풀이4)
+- [Imperative vs Declarative](#imperative-vs-declarative)
+  - [시험 팁](#시험-팁)
+  - [명령형 command](#명령형-command)
+- [문제플이5](#문제플이5)
+- [kubectl apply의 원리](#kubectl-apply의-원리)
 
 # Kubernetes Architecture
 
@@ -130,7 +142,7 @@ ETCDCTL은 ETCD API Server에 특정 파일 루트를 통해 인증할 수 있�
 ```
 
 # Kube-API Server
-Kubernetes는 최우선의 관리 컴포넌트다
+Kubernetes의 최우선의 관리 컴포넌트다
 
 kubectl command를 입력하면 kube-api서버에 가장 먼저 도착한다.
 
@@ -352,8 +364,9 @@ kubectl scale --replicas=6 replicaset myapp-replicaset
 2. system의 ReplicaSets 갯수: 0
    ```bash
    kubectl get replicaset
+   kubectl get rs
    ```
-3. 현재 ReplicaSets 갯수: 1
+3. 현재 Deployments 갯수: 1
 4. new-replica-set의 desired pod 갯수
    ```bash
    controlplane ~ ➜  kubectl get replicaset
@@ -461,3 +474,344 @@ kubectl scale --replicas=6 replicaset myapp-replicaset
 Deployment는 Replicaset 그 상위의 개념으로 Deployment를 create하면 하위의 Replicaset가 배포되며 그 하위의 pod까지 배포된다.
 
 ![deployment](images/deployment.png)
+
+
+# Service
+
+Kubernetes 클러스터 내에서 특정 포드 그룹에 안정적인 네트워크 접근을 제공하는 추상화 레이어
+
+![kubernetes-service](images/kubernetes-service.png)
+
+10.244.0.2를 웹 어플리케이션으로 가정하고 로컬 컴퓨터에서 접속하려고 한다.  
+만약 컴퓨터에서 10.244.0.2를 접근하려면 ssh로 node에 접속한 후 접근하는 방법밖에 없지만 Service를 이용하면 ssh 접속 없이 웹 어플리케이션에 접속 가능해진다.
+
+service는 Node의 port를 listen해서 request를 POD로 포워딩한다.
+
+Kubernetes에 Service는 세 가지 형태가 존재한다.
+
+- NodePort
+- ClusterIP
+- LoadBalancer
+
+## NodePort
+
+![kubernetes-nodeport](images/kubernetes-nodeport.png)
+
+세 개의 포트가 있는 것을 확인할 수 있다.
+1. pod의 Port는 실제 웹 서버 포트다.
+2. Service는 Node 안의 일종의 가상 서버로 IP 주소를 가지고 있으며 service의 ClusterIP라고 불린다
+3. NodePort는 30,000~32,767 포트만 사용 가능하다.
+
+Service를 생성하기 위해서는 똑같이 definition 파일을 작성하면 된다
+
+![service_definition](images/service_definition.png)
+
+필수로 작성해야 하는 필드는 port이며 그 외의  
+targetPort를 작성하지 않으면 port와 같다고 가정한다.  
+만약 nodePort를 지정하지 않으면 가능한 대역대의 가능한 포트를 설정한다.
+
+-로 시작하기 때문에 list형태를 가진다는 것을 알 수 있는데 여기서 어느 파드에 연결할지 명시하질 않았다.
+
+![service_define_selector](images/service_define_selector.png)
+
+이를 연결하기 위해 kubernetes에서는 보통 label과 selector를 사용한다.
+
+ - label: 리소스를 설명하고 조직화하는데 사용되는 메타데이터
+ - selector: label을 기준으로 리소스를 선택하고 필터링하는데 사용되는 도구
+
+pod의 manifest에 label을 입력하고  
+서비스에는 selector를 이용해 각 app에 설정된 label을 입력하면 된다.
+
+여러 개의 pod를 연결할 때도 자동으로 적용되며
+
+![n_of_pods](images/n_of_pods.png)
+
+여러 노드가 존재할때도 service가 여러 노드에 걸쳐 확장되어 target port를 매핑해준다.
+
+![n_of_nodes](images/n_of_nodes.png)
+
+
+## clusterIP
+
+가용성을 위해 하나의 이미지로 여러 애플리케이션을 배포했다면 각각 연결하기 위해서 ip를 직접 입력할 수 없을 것이다.
+
+이 때 사용되는게 clusterIP다.
+
+예를 들어 backend Server를 하나로 묶어서 backend Cluster를 만들어 서로 통신하게 만든다.
+
+![backend_cluster](images/backend_cluster.png)
+
+label을 이용해 backend pod를 정의하고 backend pod들을 하나로 묶을 수 있는 clusterIP definition manifest를 만들어 배포하면 된다.
+
+## LoadBalancer
+
+위에서 봤던 NodePort가 외부에 노출되는 port 설정을 담당하는 것을 알 수 있는데 해당 서비스를 이용하기 위해서 사용자에게 여러개의 포트 중 어떤 것을 노출해야 할까
+
+![load_balancer](images/load_balancer.png)
+
+지금 상태로는 result-app을 봤을 때 네 개의 ip의 각 port에 접근 가능한 것을 알 수 있다.
+
+물론 직접 nginx서버 등을 이용해 load balancing을 설정할 수도 있겠지만 kubernetes는 여러 CSP의 load balancer와의 통합을 지원하기 때문에 service definition시에 type을 LoadBalancer로 설정하면 해당 서비스들을 이용할 수 있다.
+
+
+
+
+
+# 문제풀이3
+1. 몇개의 서비스가 존재: 1
+   ```bash
+   kubectl get services
+   kubectl get svc
+   NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+   kubernetes   ClusterIP   10.43.0.1    <none>        443/TCP   10m
+   ```
+2. 위의 서비스는 default로 생성된 서비스다.
+3. kubernetes service의 default type은: clusterIP
+4. kubernetes service에 설정된 targetPort는: 6443
+   ```bash
+   kubectl describe service kubernetes
+   Name:              kubernetes
+   Namespace:         default
+   Labels:            component=apiserver
+                     provider=kubernetes
+   Annotations:       <none>
+   Selector:          <none>
+   Type:              ClusterIP
+   IP Family Policy:  SingleStack
+   IP Families:       IPv4
+   IP:                10.43.0.1
+   IPs:               10.43.0.1
+   Port:              https  443/TCP
+   TargetPort:        6443/TCP
+   Endpoints:         192.22.80.8:6443
+   Session Affinity:  None
+   Events:            <none>
+   ```
+5. 몇 개의 label이 설정되어있는지: 2
+6. 몇 개의 endpoint가 설정되어 있는지: 1
+7. 시스템에 몇 개의 deployments가 존재하는지: 1
+   ```bash
+   kubectl get deployment
+   kubectl get deploy
+   NAME                       READY   UP-TO-DATE   AVAILABLE   AGE
+   simple-webapp-deployment   4/4     4            4           33s
+   ```
+8. deployment 안의 pod를 만들기 위해 사용된 이미지는: simple-webapp:red
+9. simple-webapp-ui에 접근 가능한지: No
+10. service-definition-1.yaml을 이용해 service를 만들어라
+    ```bash
+    apiVersion: v1
+    kind: Service
+    metadata:
+    name: webapp-service
+    namespace: default
+    spec:
+    ports:
+    - nodePort: 30080
+       port: 8080
+       targetPort: 8080
+    selector:
+       name: simple-webapp
+    type: NodePort
+
+    kubectl apply -f service-definition-1.yaml
+    ```
+
+# namespace
+
+kubernetes는 내부적 목적을 위해 networking solution이나 DNS 서비스들은 유저로부터 보호하기 위해 클러스터 시작과 함께 만들어진 kube-system namespace를 생성한다.
+
+![namespaces](images/namespaces.png)
+
+각각의 목적에 맞게 namespace를 분리할 수 있으며 다른 namespace의 resource와 통신도 가능하다.
+
+![networking_with_another_namespace](images/networking_with_another_namespace.png)
+
+순서대로 service name, namespace, service, domain이다.
+
+![specify_namespace](images/specify_namespace.png)
+
+pod의 manifest에서부터 namespace를 명시하는 방법도 있으며 이런 사용법은 권장된다.
+
+namespace 역시 manifest를 통해 생성 가능하다.
+
+![create_namespace](images/create_namespace.png)
+
+만들어진 namespace로 이동해 더 이상 --namespace=dev를 입력하고 싶지 않다면
+
+```bash
+kubectl config set-context $(kubectl config current-context) --namespace=dev
+```
+를 통해 이동 가능하다.
+
+```bash
+kubectl get pods --all-namespaces
+```
+
+명령어를 통해 모든 namespace의 pod를 탐색하는 것도 가능하다.
+
+resource quota를 이용해 namespace의 자원 리밋도 가능하다.
+
+![resource_quota](images/resource_quota.png)
+
+
+# 문제풀이4
+1. system에 몇 개의 namespace가 있는지: 10
+   ```bash
+   kubectl get ns
+   ```
+2. research namespace에 몇 개의 pod가 존재하는지: 2
+   ```bash
+   kubectl get pods --namespace=research
+   NAME    READY   STATUS             RESTARTS      AGE
+   dna-2   0/1     CrashLoopBackOff   3 (44s ago)   93s
+   dna-1   0/1     CrashLoopBackOff   3 (41s ago)   93s
+   ```
+3. finance namespace에 pod를 만들어라
+   ```bash
+   kubectl run redis --image=redis -n finance
+   pod/redis created
+   ```
+4. blue pod는 어느 namespace에 존재하는지: marketing
+   ```bash
+   kubectl get pods --all-namespaces
+   kubectl get pods -A
+   ```
+5. link로 blue 페이지에 접속해봐라
+6. blue가 같은 namespace내의 db-service에 접근하기 위해 어떤 이름을 사용해야 하는지: db-service
+7. blue가 다른 namespace dev의 db-service에 접근하기 위해 어떤 이름을 사용해야 하는지: db-service.dev.svc.cluster.local
+
+# Imperative vs Declarative
+명령형은 할 일들을 적고 선언형은 최종 목적을 적는다
+
+Imperative 접근 방식
+
+- 설명: 목표를 달성하기 위해 단계별 명령을 실행하며, 각 단계를 명확히 지시한다.
+- 예시: 택시를 타고 운전사에게 길을 단계별로 지시하는 것과 같다. 예를 들어, “B 거리로 우회전, C 거리로 좌회전” 등의 지시를 내림.
+- 사용 예: kubectl run 명령어로 파드를 생성하거나, kubectl create deployment로 디플로이먼트를 생성하는 경우.
+- 장점: 빠른 객체 생성 및 수정이 가능하여 시험이나 간단한 작업에 유용함.
+- 단점: 복잡한 환경에서는 관리가 어려움. 명령어 기록이 유지되지 않으며, 다른 사람과의 협업이 어려울 수 있음.
+
+Declarative 접근 방식
+
+- 설명: 최종 상태를 선언하고, 시스템이 자동으로 필요한 작업을 수행하도록 한다.
+- 예시: 우버와 같은 앱을 사용하여 최종 목적지만 설정하고, 경로는 시스템이 알아서 찾는 것과 같다.
+- 사용 예: YAML 파일로 구성된 객체 정의 파일을 사용하여 kubectl apply 명령어로 객체를 생성, 수정 또는 삭제하는 경우.
+- 장점: 일관된 상태 관리를 가능하게 하며, 변경 사항을 기록하고 추적할 수 있어 협업과 유지보수에 용이함.
+- 단점: 초기 설정이 다소 복잡할 수 있음.
+
+## 시험 팁
+
+- Imperative 명령어: 간단한 작업이나 단순한 객체 생성에는 imperative 명령어를 사용하여 시간을 절약할 수 있음.
+- Declarative 접근: 복잡한 요구사항이나 여러 컨테이너를 포함하는 경우에는 YAML 파일을 작성하여 kubectl apply 명령어를 사용하는 것이 더 나은 선택임.
+
+
+## 명령형 command
+- --dry-run=client: 리소스를 실제로 생성하지 않고 명령이 올바른지 테스트하는 옵션.
+- -o yaml: 명령의 결과를 YAML 형식으로 출력하는 옵션.
+- 이 두 옵션을 함께 사용하면 리소스 정의 파일을 빠르게 생성할 수 있다.
+
+# 문제플이5
+1. nginx:alpine 이미지를 이용해 nginx-pod pod를 만들어라
+   ```bash
+   kubectl run nginx-pod --image=nginx:alpine
+   ```
+2. tier=db 라벨을 가진 redis pod를 redis:alpine 이미지로 만들어라
+   ```bash
+   kubectl run redis --image=redis:alpine --dry-run=client -o yaml > redis-pod.yaml
+
+   apiVersion: v1
+   kind: Pod
+   metadata:
+   creationTimestamp: null
+   labels:
+      tier: db
+   name: redis
+   spec:
+   containers:
+   - image: redis:alpine
+      name: redis
+      resources: {}
+   dnsPolicy: ClusterFirst
+   restartPolicy: Always
+   status: {}
+
+   kubectl apply -f redis-pod.yaml
+   ```
+3. redis를 노출시키기 위한 redis-service를 port 6379로 만들어라
+   ```bash
+   kubectl expose pod redis --port=6379 --name redis-service
+   ```
+4. webapp deployment를 kodekloud/webapp-color를 이용해 3개의 레플리카로 만들어라
+   ```bash
+   kubectl create deployment webapp --image=kodekloud/webapp-color --replicas=3
+   ```
+5. custom-nginx pod를 nginx이미지를 이용해 만들고 8080포트를 열어라
+   ```bash
+   kubectl run custom-nginx --image=nginx --port=8080
+   ```
+6. dev-ns namespace를 명령형으로 만들어라
+   ```bash
+   kubectl create namespace dev-ns
+   ```
+7. dev-ns namespace에 redis-deploy라는 deployment를 replica 2개로 만들어라
+   ```bash
+   kubectl create deployment redis-deploy --image=redis --replicas=2 -n dev-ns
+   ```
+8. httpd:alpine 이미지를 이용해 default namespace에 httpd pod를 만들고 ClusterIP service를 같은 이름으로 만들어라. 타겟 포트는 80
+   ```bash
+   kubectl run httpd --image=httpd:alpine --port=80 --expose
+
+   apiVersion: v1
+   kind: Service
+   metadata:
+   creationTimestamp: null
+   name: httpd
+   spec:
+   ports:
+   - port: 80
+      protocol: TCP
+      targetPort: 80
+   selector:
+      run: httpd
+   status:
+   loadBalancer: {}
+   ---
+   ---
+   apiVersion: v1
+   kind: Pod
+   metadata:
+   creationTimestamp: null
+   labels:
+      run: httpd
+   name: httpd
+   spec:
+   containers:
+   - image: httpd:alpine
+      name: httpd
+      ports:
+      - containerPort: 80
+      resources: {}
+   dnsPolicy: ClusterFirst
+   restartPolicy: Always
+   status: {}
+   ```
+
+# kubectl apply의 원리
+
+kubectl apply 명령어는 로컬 구성 파일, Kubernetes의 라이브 객체 정의, 마지막으로 적용된 구성을 비교하여 변경 사항을 결정한다.
+
+
+- 객체 생성 시:
+  - 객체가 존재하지 않으면 새로운 객체를 생성한다.
+  - Kubernetes 내에 객체의 상태를 저장하는 추가 필드가 있는 객체 구성을 만든다.
+  - 로컬 객체 구성 파일을 JSON 형식으로 변환하여 마지막으로 적용된 구성으로 저장한다.
+- 객체 업데이트 시:
+  - 로컬 파일의 값과 라이브 구성의 값을 비교하여 차이가 있으면 라이브 구성을 업데이트한다.
+  - 마지막으로 적용된 JSON 형식을 최신 상태로 업데이트한다.
+- 필드 삭제 시:
+  - 로컬 파일에서 삭제된 필드가 마지막으로 적용된 구성에 있으면 라이브 구성에서 해당 필드를 제거한다.
+- 중요한 포인트:
+  - 마지막으로 적용된 구성은 라이브 객체 구성의 어노테이션으로 저장된다.
+  - kubectl create 또는 kubectl replace 명령어는 마지막으로 적용된 구성을 저장하지 않는다.
+  - 혼용하지 않도록 주의해야 한다. kubectl apply 명령어를 사용하여 변경 사항을 적용하면, 앞으로도 동일한 명령어를 사용해야 한다.
