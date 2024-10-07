@@ -95,6 +95,7 @@
   * [Ansible](lecture/ansible을이용한자동화/readme.md)
   * [k8s](lecture/k8s/README.md)
     * [section2](lecture/k8s/section2/section2.md)
+    * [section3](lecture/k8s/section3/section3.md)
 * [experiences](experiences)
   * [workshops](experiences/workshops)
     * [EKS](experiences/workshops/EKS.md)
