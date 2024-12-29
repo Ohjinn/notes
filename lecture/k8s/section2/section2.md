@@ -318,7 +318,7 @@ Replication Controller는 Replica Set에 의해 대체된 오래된 기술로
 
 rc-definition.yml을 보면
 
-![alt text](images/replica_controller.yaml.png)
+![alt text](images/replica_controller.yaml.png)  
 metadata가 두 개 존재하게 된다.
 - Replication Controller를 위한 metadata
 - pod를 위한 metadata
@@ -437,7 +437,7 @@ kubectl scale --replicas=6 replicaset myapp-replicaset
     # selector의 matchLabels와 template의 labels가 다르다. frontend를 nginx로 변경 후 실행
     kubectl create -f replicaset-definition-2.yaml
     ```
-13. replicaset-1, 2를 지워라
+13. replicaset-1, 2를 지워라  
     ![delete_replica_set](images/delete_replica_set.png)
 14. new-replica-set에서 올바른 busybox 이미지를 사용하도록 고쳐라
     ```bash
