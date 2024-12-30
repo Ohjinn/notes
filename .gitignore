@@ -1,9 +1,10 @@
 .DS_Store
 
 # Ignore Terraform files
-*.tf
+
 *.tfstate
 *.tfstate.backup
 .terraform/
 .terraform.lock.hcl
+.terraform.tfstate.lock.info
 *.pem
