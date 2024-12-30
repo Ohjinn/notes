@@ -1,0 +1,5 @@
+prefix      =       "user09"
+region      =       "koreacentral"
+vnet_cidr    =       "10.0.0.0/16"
+subnet_prefix = "10.0."
+subnet_suffix = ".0/24"

@@ -1,0 +1,6 @@
+prefix                  =          "user16"
+region                  =          "koreacentral"
+vnet_cidr               =          "10.16.0.0/16"
+subnet_cidr             =          "10.16.10.0/24"
+password                =          "azureCIA!234567"
+admin_access_cidrs      =          "121.166.132.10"

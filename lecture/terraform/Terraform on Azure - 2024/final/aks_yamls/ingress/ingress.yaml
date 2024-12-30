@@ -1,0 +1,34 @@
+# ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx  # IngressClass 이름 추가
+  rules:
+  - http:
+      paths:
+      - path: /page1
+        pathType: Prefix
+        backend:
+          service:
+            name: app1
+            port:
+              number: 80
+      - path: /page2
+        pathType: Prefix
+        backend:
+          service:
+            name: app2
+            port:
+              number: 80
+      - path: /page3
+        pathType: Prefix
+        backend:
+          service:
+            name: app3
+            port:
+              number: 80

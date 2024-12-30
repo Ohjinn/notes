@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  labels:
+    app: load-generator
+spec:
+  replicas: 20  # 원하는 부하 생성기 Pod의 개수
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+    spec:
+      containers:
+      - name: load-generator
+        image: busybox
+        command: ["/bin/sh", "-c", "while true; do wget -q -O- http://4.230.149.2/page1; wget -q -O- http://4.230.149.2/page2; wget -q -O- http://4.230.149.2/page3; done"]
+        resources:
+          limits:
+            memory: "256Mi"  # 메모리 제한
+            cpu: "200m"      # CPU 제한
+          requests:
+            memory: "128Mi"   # 메모리 요청
+            cpu: "100m"       # CPU 요청

@@ -1,0 +1,48 @@
+# app1.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app1
+  template:
+    metadata:
+      labels:
+        app: app1
+    spec:
+      containers:
+        - name: app1
+          image: nginx
+          ports:
+            - containerPort: 80
+          resources:
+            limits:
+              memory: "256Mi" # 메모리 제한
+              cpu: "500m" # CPU 제한
+            requests:
+              memory: "128Mi" # 메모리 요청
+              cpu: "250m" # CPU 요청
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+      volumes:
+        - name: html
+          configMap:
+            name: app1-html
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app1
+spec:
+  selector:
+    app: app1
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
