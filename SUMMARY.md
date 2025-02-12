@@ -90,6 +90,8 @@
     * [2장](book/Terraform_Cookbook/2장/2장.md)
     * [3장](book/Terraform_Cookbook/3장/3장.md)
     * [4장](book/Terraform_Cookbook/4장/4장.md)
+    * [5장](book/Terraform_Cookbook/5장/5장.md)
+    * [6장](book/Terraform_Cookbook/6장/6장.md)
 * [lecture](lecture/README.md)
   * [외워서끝내는네트워크기초](lecture/network\_basic/README.md)
   * [외워서끝내는네트워크심화](lecture/network\_adv/README.md)
