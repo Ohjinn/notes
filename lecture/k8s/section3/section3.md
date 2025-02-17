@@ -428,3 +428,10 @@ Node Affinity 타입에는
                   - key: node-role.kubernetes.io/control-plane
                      operator: Exists
    ```
+
+taint toleration 설정을 하면 각각의 pod가 node에 배치되도록 설정한다. 벌레기피제와 특정 향기를 좋아하는 벌레 비유와 같이  
+taint를 node에 뿌리면 해당 설정을 좋아하는 pod가 붙게된다. 하지만 해당 상황에서는 내가 배치하고자 하는 pod가 taint가 없는 node에 붙을 수 있다.
+
+이 때 Node Affinity를 이용해 pod를 node에 특정할 수 있다. 하지만 해당 상황에서는 또 내가 배치하고자 하는 pod가 아닌 pod가 오면 안되는 node에 붙을 수 있다.
+
+이럴 떄 taint, toleration과 Node Affinity를 섞어서 이용하면 특정 node에 pod가 배치되도록 강제할 수 있다.
