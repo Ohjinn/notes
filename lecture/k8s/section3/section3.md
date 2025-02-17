@@ -8,6 +8,10 @@
     - [문제풀이2](#문제풀이2)
   - [Taints and Tolerations](#taints-and-tolerations)
     - [문제풀이3](#문제풀이3)
+  - [Node Selectors \& Node Affinity](#node-selectors--node-affinity)
+    - [Node Selectors](#node-selectors)
+    - [Node Affinity](#node-affinity)
+    - [문제풀이4](#문제풀이4)
 
 ## Manual Scheduling
 
@@ -223,4 +227,204 @@ kubectl describe node kubemaster | grep Taint
 
    ```bash
    kubectl taint nodes controlplane node-role.kubernetes.io/control-plane:NoSchedule-
+   ```
+
+## Node Selectors & Node Affinity
+
+만약 데이터 처리같이 높은 성능을 필요로 하는 pod가 존재하고, 그에 맞춰 node를 큰거 하나랑 작은거 두 개를 준비했다면 특정 node에서만 pod가 실행되도록 설정해야 한다.  
+그 때 사용할 수 있는 것
+
+### Node Selectors
+
+Node Selectors
+노드에 이미 지정된 라벨을 기반으로 pod가 찾아간다.
+
+```bash
+## node에 label 추가
+kubectl label nodes node-1 size=Large
+
+## pod에 nodeSelector 추가
+apiVersion:
+kind: Pod
+metadata:
+   name: myapp-pod
+spec:
+   containers:
+   - name: data
+```
+
+   하지만 단순한 키-값 매칭만 가능하며 복잡한 조건(large or medium 등)이 불가능해 주로 Node Affinity를 쓴다
+
+### Node Affinity
+
+or이나 not 표현을 사용할 수 없는 Node Selectors의 한계를 극복하기 위해 등장했다.
+
+```bash
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: size
+                operator: In
+                values:
+                  - large
+```
+
+size=large 라벨이 있는 노드에서만 pod가 실행되며 NotIn이나 values에 값을 추가해 하나라도 매칭되면 배치되게 할 수도 있다.
+
+Exists: 해당 키가 존재하면 선택(값 비교 X)
+
+Node Affinity 타입에는
+
+|타입|동작 방식|
+|--|----|
+|requiredDuringSchedulingIgnoredDuringExecution | 필수 조건: 매칭되는 노드가 없으면 Pod는 스케줄링되지 않음. 실행 중에는 영향을 받지 않음.|
+|preferredDuringSchedulingIgnoredDuringExecution | 우선 조건: 매칭되는 노드가 있으면 배치, 없으면 다른 노드에도 배치 가능.|
+|requiredDuringSchedulingRequiredDuringExecution | (예정) 필수 조건 + 실행 중에도 적용: 실행 중에도 라벨 변경 시 Pod를 퇴출(evict).|
+
+실행중에는 기존 타입들은 변경된 라벨을 반영하지 않음
+
+### 문제풀이4
+
+1. How many Labels exist on node node01
+
+   ```bash
+   controlplane ~ ➜  kubectl describe node node01 | grep -i labels -A 10
+   Labels:             beta.kubernetes.io/arch=amd64
+                     beta.kubernetes.io/os=linux
+                     kubernetes.io/arch=amd64
+                     kubernetes.io/hostname=node01
+                     kubernetes.io/os=linux
+   ```
+
+2. What is the value set to the label key beta.kubernetes.io/arch on node01?  
+   amd64
+3. Apply a label color=blue to node node01
+
+   ```bash
+   kubectl label nodes node01 color=blue
+   ```
+
+4. Create a new deployment named blue with the nginx image and 3 replicas.
+
+   ```bash
+   controlplane ~ ➜  kubectl create deployment blue --image=nginx --replicas=3 --dry-run=client -o yaml > blue-nginx.yaml
+
+   controlplane ~ ➜  ls
+   blue-nginx.yaml  sample.yaml
+
+   controlplane ~ ➜  cat blue-nginx.yaml 
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+   creationTimestamp: null
+   labels:
+      app: blue
+   name: blue
+   spec:
+   replicas: 3
+   selector:
+      matchLabels:
+         app: blue
+   strategy: {}
+   template:
+      metadata:
+         creationTimestamp: null
+         labels:
+         app: blue
+      spec:
+         containers:
+         - image: nginx
+         name: nginx
+         resources: {}
+   status: {}
+
+   controlplane ~ ➜  kubectl apply -f blue-nginx.yaml 
+   deployment.apps/blue created
+   ```
+5. blue pod는 어느 node에 배치될 수 있는가?
+6. Set Node Affinity to the deployment to place the pods on node01 only.
+
+   ```bash
+   cat blue-nginx.yaml 
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+   creationTimestamp: null
+   labels:
+      app: blue
+   name: blue
+   spec:
+   replicas: 3
+   selector:
+      matchLabels:
+         app: blue
+   strategy: {}
+   template:
+      metadata:
+         creationTimestamp: null
+         labels:
+         app: blue
+      spec:
+         containers:
+         - image: nginx
+         name: nginx
+         resources: {}
+         affinity:
+         nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+               nodeSelectorTerms:
+               - matchExpressions:
+                  - key: size
+                     operator: In
+                     values:
+                     - large
+   ```
+
+7. Which nodes are the pods placed on now?
+
+   ```bash
+   kubectl get pods -o wide
+   NAME                    READY   STATUS    RESTARTS   AGE   IP           NODE     NOMINATED NODE   READINESS GATES
+   blue-5659879b55-2mrvs   1/1     Running   0          75s   172.17.1.5   node01   <none>           <none>
+   blue-5659879b55-7w6kl   1/1     Running   0          73s   172.17.1.6   node01   <none>           <none>
+   blue-5659879b55-8hx99   1/1     Running   0          77s   172.17.1.4   node01   <none>           <none>
+   ```
+
+8. Create a new deployment named red with the nginx image and 2 replicas, and ensure it gets placed on the controlplane node only.
+
+   ```bash
+   cat red-nginx.yaml 
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+   creationTimestamp: null
+   labels:
+      app: red
+   name: red
+   spec:
+   replicas: 2
+   selector:
+      matchLabels:
+         app: red
+   strategy: {}
+   template:
+      metadata:
+         creationTimestamp: null
+         labels:
+         app: red
+      spec:
+         containers:
+         - image: nginx
+         name: nginx
+         resources: {}
+         affinity:
+         nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+               nodeSelectorTerms:
+               - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                     operator: Exists
    ```
