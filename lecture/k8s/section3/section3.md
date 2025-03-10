@@ -12,7 +12,9 @@
     - [Node Selectors](#node-selectors)
     - [Node Affinity](#node-affinity)
     - [문제풀이4](#문제풀이4)
-    - [문제풀이 5](#문제풀이-5)
+    - [문제풀이5](#문제풀이5)
+  - [Daemon Sets](#daemon-sets)
+    - [문제풀이6](#문제풀이6)
 
 ## Manual Scheduling
 
@@ -437,7 +439,7 @@ taint를 node에 뿌리면 해당 설정을 좋아하는 pod가 붙게된다. �
 
 이럴 떄 taint, toleration과 Node Affinity를 섞어서 이용하면 특정 node에 pod가 배치되도록 강제할 수 있다.
 
-### 문제풀이 5
+### 문제풀이5
 
 1. A pod called rabbit is deployed. Identify the CPU requirements set on the Pod
 
@@ -454,4 +456,135 @@ taint를 node에 뿌리면 해당 설정을 좋아하는 pod가 붙게된다. �
 
 2. Delete the rabbit Pod.  
    kubectl delete pod rabbit
-3. 
+3. Another pod called elephant has been deployed in the default namespace. It fails to get to a running state. Inspect this pod and identify the Reason why it is not running.
+
+   ```bash
+   kubectl describe pod elephant
+    State:          Waiting
+      Reason:       CrashLoopBackOff
+    Last State:     Terminated
+      Reason:       OOMKilled
+      Exit Code:    1
+      Started:      Wed, 05 Mar 2025 09:14:47 +0000
+      Finished:     Wed, 05 Mar 2025 09:14:47 +0000
+    Ready:          False
+    Restart Count:  2
+   ```
+4. The status `OOMKilled` indicates that it is failing because the pod ran out of memory. Identify the memory limit set on the POD.
+   
+	```bash
+	    Limits:
+      memory:  10Mi
+    Requests:
+      memory:     5Mi
+	```
+5. The `elephant` pod runs a process that consumes 15Mi of memory. Increase the limit of the `elephant` pod to 20Mi.
+   
+   ```bash
+   # 해당 명령어로 현재 pod 정보로 elephant.yaml 파일 출력 
+   kubectl get pod elephant -o yaml > elephant.yaml
+   
+   # memory limits를 20Mi로 수정
+   
+   # 기존의 elephant.yaml을 대체
+   kubectl replace -f elephant.yaml --force
+   ```
+
+## Daemon Sets
+kube-porxy, weave-net 같은 네트워킹 컴포넌트들이 DaemonSet으로 띄워져있다.  
+모든 pod에 기본적으로 띄워져야 하는 어플리케이션들이 DaemonSet으로 만들어진다.
+
+```bash
+kubectl get daemonsets
+kubectl describe daemonsets monitoring-daemon
+```
+
+위의 명령어로 확인 가능하다.
+
+### 문제풀이6
+
+1. 모든 namespaces에서 떠 있는 Daemonsets의 갯수
+
+    ```bash
+    kubectl get daemonsets --all-namespaces
+    NAMESPACE      NAME              DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
+    kube-flannel   kube-flannel-ds   1         1         1       1            1           <none>                   4m13s
+    kube-system    kube-proxy        1         1         1       1            1           kubernetes.io/os=linux   4m14s
+    ```
+
+2. kube-proxy가 떠있는 namespace: kube-system
+3. On how many nodes are the pods scheduled by the **DaemonSet** `kube-proxy`?
+
+   ```bash
+      kubectl describe daemonset kube-proxy --namespace=kube-system
+      Name:           kube-proxy
+      Selector:       k8s-app=kube-proxy
+      Node-Selector:  kubernetes.io/os=linux
+      Labels:         k8s-app=kube-proxy
+      Annotations:    deprecated.daemonset.template.generation: 1
+      Desired Number of Nodes Scheduled: 1
+      Current Number of Nodes Scheduled: 1
+      Number of Nodes Scheduled with Up-to-date Pods: 1
+      Number of Nodes Scheduled with Available Pods: 1
+      Number of Nodes Misscheduled: 0
+      Pods Status:  1 Running / 0 Waiting / 0 Succeeded / 0 Failed
+    ```
+
+## Static pods
+
+기본적으로 worker node는 master node의 kube-apiserver, kube-scheduler, etcd cluster, controller-manager 등에 의해 통제되지만 만약 Master Node가 존재하지 않는다면 Worker Node
+
+Pod 상세 정보를 제공할 API 서버가 존재하지 않는다 이 때 기본적으로 etc/kubernetes/manifests 디렉토리에 pod 정의 파일을 넣으면 kubelet이 주기적으로 해당 파일을 읽고 호스트를 만든다.
+
+이걸 static pod라고 하며 replicaset이나 deployment는 생성할 수 없다.
+
+kubelet.service의 --pod-manifest-path 항목을 보면 경로를 확인할 수 있다.
+.service 파일에 직접 입력할 수도 있고, config 파일을 제공해서 이용할 수도 있다.
+
+![[Pasted image 20250310182736.png]]
+
+kubectl 명령어는 kube-apiserver에서 입력받기 때문에 docker ps 등 컨테이너 서비스의 명령어를 사용해야 한다.
+
+kubelet에서는 kube-api에서 명령하는 pod와 static pod 두 가지 모두 공존 가능하며 kube-api에서 static pod도 readonly로 정보를 읽을 수 있다.
+
+각각의 node에 static pod를 이용해 controller manager, apiserver, etce cluster 등등 모든 요소를 띄워놓고 독립적으로 사용 가능하다.
+
+static pod, daemonsets 둘 다 kube-scheduler에서 자유롭다.
+
+## 문제풀이 7
+1. How many static pods exist in this cluster in all namespaces? 4, static pod는 기본적으로 -controlplane으로 네이밍 된다.
+   ```bash
+    controlplane ~ ✖ kubectl get pods --all-namespaces | grep controlplane
+	kube-system    etcd-controlplane                      1/1     Running   0          15m
+	kube-system    kube-apiserver-controlplane            1/1     Running   0          15m
+	kube-system    kube-controller-manager-controlplane   1/1     Running   0          15m
+	kube-system    kube-scheduler-controlplane            1/1     Running   0          15m
+    ```
+2. Which of the below components is NOT deployed as a static pod? coredns
+    ```bash
+	controlplane ~ ➜  kubectl get pods -o wide --all-namespaces | grep controlplane
+	kube-flannel   kube-flannel-ds-c99cx                  1/1     Running   0          17m   192.168.65.225   controlplane   <none>           <none>
+	kube-system    coredns-7484cd47db-sc2cg               1/1     Running   0          17m   172.17.0.2       controlplane   <none>           <none>
+	kube-system    coredns-7484cd47db-wwhbn               1/1     Running   0          17m   172.17.0.3       controlplane   <none>           <none>
+	kube-system    etcd-controlplane                      1/1     Running   0          18m   192.168.65.225   controlplane   <none>           <none>
+	kube-system    kube-apiserver-controlplane            1/1     Running   0          18m   192.168.65.225   controlplane   <none>           <none>
+	kube-system    kube-controller-manager-controlplane   1/1     Running   0          18m   192.168.65.225   controlplane   <none>           <none>
+	kube-system    kube-proxy-6cdb9                       1/1     Running   0          17m   192.168.65.225   controlplane   <none>           <none>
+	kube-system    kube-scheduler-controlplane            1/1     Running   0          18m   192.168.65.225   controlplane   <none>           <none>
+    ```
+3. Which of the below components is NOT deployed as a static POD? kube-api-server
+    ```bash
+    controlplane ~ ➜  kubectl get pods --all-namespaces | grep controlplane
+	kube-system    etcd-controlplane                      1/1     Running   0          35m
+	kube-system    kube-apiserver-controlplane            1/1     Running   0          35m
+	kube-system    kube-controller-manager-controlplane   1/1     Running   0          35m
+	kube-system    kube-scheduler-controlplane            1/1     Running   0          35m
+    ```
+4. What is the path of the directory holding the static pod definition files? ps aux | grep kubelet
+   해당 명령어를 입력하면 --config 파일 위치가 나오는데 해당 파일을 열어서 staticPodPath를 사용하면 static pod 파일 위치가 확인 가능하다.
+5. Create a static pod named `static-busybox` that uses the `busybox` image and the command `sleep 1000`
+   ```bash
+   kubectl run --restart=Never --image=busybox static-busybox --dry-run=client -o yaml --command -- sleep 1000 > /etc/kubernetes/manifests/static-busybox.yaml
+```
+6.  We just created a new static pod named **static-greenbox**. Find it and delete it.
+This question is a bit tricky. But if you use the knowledge you gained in the previous questions in this lab, you should be able to find the answer to it.
