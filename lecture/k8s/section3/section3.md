@@ -1,4 +1,4 @@
-# Section3
+# Scheduling
 
 - [Section3](#section3)
   - [Manual Scheduling](#manual-scheduling)
@@ -551,7 +551,7 @@ kubelet에서는 kube-api에서 명령하는 pod와 static pod 두 가지 모두
 
 static pod, daemonsets 둘 다 kube-scheduler에서 자유롭다.
 
-## 문제풀이 7
+### 문제풀이 7
 1. How many static pods exist in this cluster in all namespaces? 4, static pod는 기본적으로 -controlplane으로 네이밍 된다.
    ```bash
     controlplane ~ ✖ kubectl get pods --all-namespaces | grep controlplane
@@ -588,3 +588,190 @@ static pod, daemonsets 둘 다 kube-scheduler에서 자유롭다.
 ```
 6.  We just created a new static pod named **static-greenbox**. Find it and delete it.
 This question is a bit tricky. But if you use the knowledge you gained in the previous questions in this lab, you should be able to find the answer to it.
+
+
+### 문제풀이 8
+1. What is the name of the POD that deploys the default kubernetes scheduler in this environment?
+   ```
+    controlplane ~ ✖ k get pods -n kube-system
+	NAME                                   READY   STATUS    RESTARTS   AGE
+	coredns-7484cd47db-46hwv               1/1     Running   0          5m39s
+	coredns-7484cd47db-ldwlb               1/1     Running   0          5m39s
+	etcd-controlplane                      1/1     Running   0          5m44s
+	kube-apiserver-controlplane            1/1     Running   0          5m44s
+	kube-controller-manager-controlplane   1/1     Running   0          5m44s
+	kube-proxy-nx25b                       1/1     Running   0          5m39s
+	kube-scheduler-controlplane            1/1     Running   0          5m44s
+    ```
+2. Let's create a configmap that the new scheduler will employ using the concept of `ConfigMap as a volume`.  We have already given a configMap definition file called `my-scheduler-configmap.yaml` at `/root/` path that will create a configmap with name `my-scheduler-config` using the content of file `/root/my-scheduler-config.yaml`.
+   ```
+   k create -f /root/my-scheduler-configmap.yaml
+    ```
+3. Deploy an additional scheduler to the cluster following the given specification.
+	Use the manifest file provided at `/root/my-scheduler.yaml`. Use the same image as used by the default kubernetes scheduler.
+	```bash
+	vi my-scheduler.yaml, image를 registry.k8s.io/kube-scheduler:v1.32.0로 변경
+	k create -f my-scheduler.yaml 실행
+    ```
+
+4. A POD definition file is given. Use it to create a POD with the new custom scheduler. File is located at `/root/nginx-pod.yaml`
+   ```bash
+    apiVersion: v1
+	kind: Pod 
+	metadata:
+	  name: nginx
+	spec:
+	  schedulerName: my-scheduler
+	  containers:
+	  - image: nginx
+	    name: nginx
+    ```
+
+
+## Scheduler Profiles
+
+스케줄링은
+
+Scheduling Queue - Filtering - Scoring - Binding 순서로 이뤄진다.
+
+
+1. Scheduling
+	- PriorityClass kind로 정의 가능하며 pod-definition에는 priorityClassName으로 매칭해줄 수 있다.
+	- 이 과정에서 높은 priority를 가진 POD가 Queue에서 먼저 배치된다.
+	- PrioritySort Plugin
+2. Filtering
+	- pod의 조건에 맞지 않는 node를 제거한다
+	- NodeResourcesFit, NodeName, NodeUnschedulable Plugin
+3. Scoring
+	- 배치 후 남은 노드의 리소스양을 계산한 후 가장 많은 리소스가 남게 되는 node가 선택되어 Binding된다.
+	- NodeResourcesFit ImageLocality Plugin
+4. Binding
+	- pod를 적합한 node에 배치하는 과정
+	- DefaultBinder Plugin
+
+
+각 과정에서는 필요한 플러그인들이 있으며 각각의 플러그인들은 Scheduling Queue, Filtering, Scoreing, Binding의 Extension들에 binding된다. queueSort, preFilter, filter, postFilter, preScore 등의 Extension들이 있고 필요한 플러그인들을 연결할 수 있다.
+
+1.18 이후 여러 스케줄러가 하나의 config에서 설정될 수 있다.
+
+## RBAC
+
+
+```bash developer-role.yaml
+apiVersion: rbac.autorization.k8s.io/v1
+kind: Role
+metadata:
+	name: developer
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["create"]
+  resourceNames: ["blue", "orange"]
+```
+
+### Admission Controllers
+
+![[Pasted image 20250317183621.png]]
+
+Admission Controller는 
+
+kubectl - kubeapi server - authentication - authorization - admission controller - action
+
+사이에 껴 있는데 인증과정 후에 NamespaceAutoProvision 등과 같이 존재하지 않는 namespace로 명령이 들어왔을 때 자동으로 생성하는 등 기능을 가진 Controller들이 존재한다
+
+
+### 문제풀이 9
+
+1. admission controller의 역할이 아닌 것은: 사용자 인증
+2. Which admission controller is not enabled by default?
+3. Which admission controller is enabled in this cluster which is normally disabled?
+   grep enable-admission-plugins /etc/kubernetes/manifests/kube-apiserver.yaml
+    --enable-admission-plugins=NodeRestriction
+4. /etc/kubernetes/manifest/kubeapi-server.yaml에서 수정하면 admission controller 수정 가능
+
+
+**✅ Validating Admission Controller (검증)**
+
+• 요청을 검증(Validate)한 후, **허용하거나 거부(Allow/Deny)**
+
+• 예: NamespaceExists
+
+• 요청한 네임스페이스가 존재하는지 확인하고, 없으면 요청 거부
+
+  
+
+**✅ Mutating Admission Controller (수정)**
+
+• 요청을 수정(Mutate)하여 적용
+
+• 예: DefaultStorageClass
+
+• PVC(Persistent Volume Claim) 요청 시 **StorageClass가 없으면 기본값을 자동 추가**
+
+  
+
+**✅ Validating + Mutating Admission Controller**
+
+• 요청을 **수정 후 검증하는 Admission Controller**
+
+• 예:
+
+• NamespaceAutoProvisioning → 네임스페이스가 없으면 생성 (Mutating)
+
+• NamespaceExists → 존재 여부 검증 (Validating)
+
+• 순서 중요: **Mutating → Validating** 순으로 실행되어야 정상 동작
+
+
+
+
+**📌 기본 내장 Admission Controller 외에, 사용자 정의 Admission Controller를 추가 가능**
+
+• Kubernetes에서는 MutatingAdmissionWebhook, ValidatingAdmissionWebhook을 제공하여 **외부 웹훅(Webhook) 기반 Admission Controller를 만들 수 있음**
+
+  
+
+**✅ Admission Webhook 동작 방식**
+
+1. 클러스터 내 또는 외부에 **Admission Webhook 서버** 배포
+
+2. Kubernetes 요청이 **기본 Admission Controller를 통과한 후, Webhook을 호출**
+
+3. Webhook 서버는 요청을 AdmissionReview JSON 객체로 수신
+
+4. Webhook 서버는 요청을 검토하고, allowed: true(허용) 또는 allowed: false(거부) 응답
+
+  
+
+**✅ Webhook 서버 개발 (예: Python)**
+
+• validate() → 요청을 검증하고 특정 조건이 맞으면 거부
+
+• mutate() → 요청을 수정하여 특정 값을 자동 추가
+
+• JSON Patch 형식으로 요청 객체를 수정할 수도 있음
+
+• 개발 후 Kubernetes 클러스터 내부 또는 외부에서 실행 가능
+
+
+### 문제풀이 10
+1. Which of the below combination is correct for Mutating and validating admission controllers 
+2. mutating 먼저 그 다음 validating 실행된다
+3. Create **TLS secret** `webhook-server-tls` for secure webhook communication in `webhook-demo` namespace.
+   kubectl create secret tls webhook-server-tls --cert=/root/keys/webhook-server-tls.crt --key=/root/keys/webhook-server-tls.key -n webhook-demo
+4. Create webhook deployment now.
+   kubectl create -f /root/webhook-deployment.yaml
+5. Create webhook service now.
+   kubectl create -f /root/webhook-service.yaml
+6. We have added MutatingWebhookConfiguration under `/root/webhook-configuration.yaml`. 어떤 request에서 동작하는가?
+   ```bash
+   rules:
+      - operations: [ "CREATE" ]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    admissionReviewVersions: ["v1beta1"]
+    sideEffects: None
+    ```
+7. Now lets deploy MutatingWebhookConfiguration in `/root/webhook-configuration.yaml`
+   kubectl create -f /root/webhook-configuration.yaml
