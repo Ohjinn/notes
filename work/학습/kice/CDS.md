@@ -110,13 +110,11 @@ VMWare를 Azure로 Migration하게 되면 Agent, Agentless방식 두 가지중�
 ## AKS 장애 대응:Node Not Ready, POD Pending 등 이슈 원인 파악 및 대응방법 이해
 
 
-### Node Not Ready
+### Node Not Ready 원인 및 대응 방법
 - kubectl get nodes 에 NotReady 표기
 - kubectl describe node 의 Conditions에서 Ready=False, NetworkUnavailable=True, MemoryPressure=True, DiskPressure=True, PIDPressure=True 등 확인
 
-#### 대응 방법
-
-A. kubelet/컨테이너 런타임 장애
+#### A. kubelet/컨테이너 런타임 장애
 
 1. ssh를 통해 해당 node에 접속
 2. 아래 명령어들을 이용해 kubelet, 컨테이너 런타임 장애여부 확인 
@@ -131,7 +129,7 @@ A. kubelet/컨테이너 런타임 장애
    ```
 
 
-B. 리소스 부족
+#### B. 리소스 부족
 1. kubectl describe node의 Pressure=True 확인
    Memory/PID Pressure: 과소요 파드 제한/리소스쿼터 도입, 문제 파드 축출. 필요 시 노드풀 스케일아웃.
 2. DiskPressure: 이미지/컨테이너 정리
@@ -141,7 +139,7 @@ B. 리소스 부족
 	sudo du -sh /var/lib/containerd/* /var/lib/kubelet/* 2>/dev/null
 	```
 
-C. 네트워크/CNI 문제
+#### C. 네트워크/CNI 문제
 1. NetworkUnavailable=True, kubelet이 API 서버로 Heartbeat 실패
 2. 아래 명령어(CoreDNS, konnectivity 예시)를 이용해 장애 여부 확인
 	```bash
@@ -150,7 +148,7 @@ C. 네트워크/CNI 문제
 	```
 3. CNI/시스템 파드 재시작, 노드 재부팅, 노드 교체, UDR/NSG 변경 여부 점검
 
-D. 시간 동기화/인증 토큰 문제
+#### D. 시간 동기화/인증 토큰 문제
 1. 노드 시간이 크게 틀어진 경우 API 인증 실패 가능성이 존재, node에 접속 후
 2. 아래 명령어를 이용해 시간 확인
 	```bash
@@ -158,7 +156,7 @@ D. 시간 동기화/인증 토큰 문제
 	```
 3. NTP 동기화 복구, kubelet 재시작
 
-E. 노드가 cordon/drain 상태로 방치
+#### E. 노드가 cordon/drain 상태로 방치
 1. NotReady,SchedulingDisabled 또는 kubectl get nodes에 SchedulingDisabled
 2. 아래 명령어를  통해 node를 uncordon으로 설정 혹은 필요시 drain
    ```bash
@@ -166,11 +164,11 @@ E. 노드가 cordon/drain 상태로 방치
 	kubectl drain <NODE> --ignore-daemonsets --delete-emptydir-data
 	```
 
-### POD Pending
+### POD Pending 원인 및 대응 방법
 - 스케줄러가 아직 파드를 어떤 노드에도 배치하지 못한 상태.
     (이미 스케줄된 뒤 컨테이너 풀/이미지 문제는 보통 ContainerCreating/ImagePullBackOff로 보입니다.)
 
-A. 리소스 부족
+#### A. 리소스 부족
 1. 아래 명령어로 리소스 부족 확인
 	```bash
 	kubectl describe pod 
@@ -181,7 +179,7 @@ A. 리소스 부족
    - pod 수 제한(kubelet의 maxPods)에 걸리면 노드 타임/설정 변경
 
 
-B. 스케줄링 제약 불일치
+#### B. 스케줄링 제약 불일치
 1. nodeSelector/nodeAffinity/topologySpreadConstraints/podAntiAffinity가 현실과 안 맞음, 또는 taint/toleration 미스매치
 2. 아래 명령어로 진단
 	```bash
@@ -191,7 +189,7 @@ B. 스케줄링 제약 불일치
    - label/taint 정합성 수정
    - 제약 완화 또는 노드풀에 해당 특성 라벨 부여/증설
 
-C. 스토리지 대기(PVC Pending)
+#### C. 스토리지 대기(PVC Pending)
 1. 파드가 Pending, PVC가 Bound되지 않음
 2. 아래 명령어로 진단
 	```bash
@@ -211,7 +209,7 @@ C. 스토리지 대기(PVC Pending)
 **담당님도 잘 모르는 부분이라고 설명하셔서 힌트가 별로 없음. 이외에 아시는 내용이 있으면 알려주시면 감사하겠습니다.**
 
 1. Azure VPN Gateway는 IPsec/IKE 기반 암호화 터널을 사용하며, 내부적으로 AES256/SHA2/PFS 같은 알고리즘을 조합한다
-2. 2. ExpressRoute → 기본은 암호화 없음. 필요 시
+2. ExpressRoute → 기본은 암호화 없음. 필요 시
     - MACsec(L2) : ExpressRoute Direct서 포트 단 암호화(BYOK, Key Vault 보관).
     - IPsec over ER : VPN over ExpressRoute(끝단 간 L3 암호화) 조합 가능.
 3. Virtual Network Encryption (VNE) → 동일 VNet/피어링 간 VM↔VM 트래픽을 DTLS로 암호화. 특정 VM SKU/Accelerated Networking 요구, 일부 네트워크 리소스와 비호환.
@@ -219,28 +217,28 @@ C. 스토리지 대기(PVC Pending)
 
 예상문제
 
-1. Q. S2S VPN은 어떤 방식으로 암호화하나?
+1. Q. S2S VPN은 어떤 방식으로 암호화하나?  
     A. IPsec/IKE. 필요 시 커스텀 정책(AES256/SHA2/PFS 등) 설정. 
     
-2. Q. ExpressRoute는 기본적으로 암호화되나?
+2. Q. ExpressRoute는 기본적으로 암호화되나?  
     A. 아니오. 필요하면 MACsec(ER Direct) 또는 IPsec over ER 사용. 
     
-3. Q. 동-서(VM↔VM) 트래픽을 네트워크 계층에서 암호화하는 Azure 기능은?
+3. Q. 동-서(VM↔VM) 트래픽을 네트워크 계층에서 암호화하는 Azure 기능은?  
     A. Virtual Network Encryption(DTLS). 
     
-4. Q. VNet Peering 간 트래픽은 암호화 필요한가?
+4. Q. VNet Peering 간 트래픽은 암호화 필요한가?  
     A. 필수 아님(Microsoft 백본 사용, 암호화 요구 X). 필요 시 VNE 또는 앱 계층 TLS 적용. 
     
-5. Q. MACsec은 어디서 쓸 수 있나?
+5. Q. MACsec은 어디서 쓸 수 있나?  
     A. ExpressRoute Direct 포트에서 L2 암호화. 키는 Key Vault에 저장/회전. 
     
-6. Q. VNE 활성화 시 주의할 점 2가지?    
+6. Q. VNE 활성화 시 주의할 점 2가지?      
     A. 지원 VM SKU+Accelerated Networking 필수, 그리고 ExpressRoute Gateway/App Gateway/Azure Firewall/Private Link와 비호환. 
     
 7. Q. Azure Files의 전송 중 암호화는?    
     A. SMB 3.x 암호화(기본 강제). 
 
-8. Q. P2S에서 동시접속 제한이 있는 프로토콜은? 대안은?
+8. Q. P2S에서 동시접속 제한이 있는 프로토콜은? 대안은?  
     A. SSTP(128 세션) 제한. IKEv2 또는 OpenVPN으로 전환.
 
 ## AKS의 이슈상황 원인과 대응방안 역량: POD Faile, FackOff, POD Schedule Design, Nodegroup scale in 시 고래해야할 POD Life Cycle 설정
@@ -317,7 +315,7 @@ Scale-in 시 연결 드레이닝, 데이터 무결성 보장이 중요합니다.
 	```bash
 	metadata:
 	  annotations:
-        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+		cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
 	```
 6. 빈약한 스테이트풀 방지: StatefulSet은 PodManagementPolicy=Parallel와 PodAntiAffinity로 분산, 스토리지는 RWO/PV 바인딩 존 일치.
 
