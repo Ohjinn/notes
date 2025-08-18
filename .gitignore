@@ -15,3 +15,6 @@
 
 # work file
 work/
+
+# track only this file in work directory
+!work/학습/kice/CDS.md

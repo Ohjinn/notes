@@ -110,3 +110,6 @@
 * [experiences](experiences)
   * [workshops](experiences/workshops)
     * [EKS](experiences/workshops/EKS.md)
+* [work](work)
+  * [학습](work/README.md)
+    * [KICE](work/학습/kice/CDS.md)
