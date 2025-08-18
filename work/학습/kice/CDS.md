@@ -74,7 +74,7 @@ OS별로 SKU가 있으며 Migration 과정에서 제약사항이 있는데 해�
 
 VMWare를 Azure로 Migration하게 되면 Agent, Agentless방식 두 가지중에 선택 가능합니다.
 
-- **Agentless (권장/기본, VMware 전용)**
+- Agentless (권장/기본, VMware 전용)
 	- vCenter + VMware 스냅샷/CBT로 증분 복제. 게스트 OS에 설치 없음. 대규모(최대 300~500대 동시)까지 스케일아웃 어플라이언스로 확장. 일부 제한(예: VMDK 이름에 비-ASCII 문자가 있으면 미지원)
 - Agent (대안)
 	- 각 서버에 Mobility Service를 설치해 블록 단위로 거의 연속 복제. 온프레미스 VMware는 물론 물리 서버·타 클라우드(AWS/GCP) 이전에도 사용. 포트/구성요소(복제 어플라이언스/프로세스 서버/443·9443 등) 요건이 있음.
@@ -82,17 +82,17 @@ VMWare를 Azure로 Migration하게 되면 Agent, Agentless방식 두 가지중�
 [마이그레이션 옵션 선택 방법](https://learn.microsoft.com/ko-kr/azure/migrate/server-migrate-overview?view=migrate-classic)
 
 ### 제약사항
-| **구분**                | **Agentless**                                                                                                              | **Agent-based**                                                               |
+| 구분                | Agentless                                                                                                              | Agent-based                                                               |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Azure 권한**          | Azure Migrate 프로젝트 생성 권한 및 어플라이언스 배포 시 만들어지는 Microsoft Entra 앱 등록 권한 필요                                                    | 구독에 대한 **Contributor 권한** 필요                                                  |
-| **복제(Replication)**   | 단일 어플라이언스 기준, 여러 vCenter 서버에서 최대 **500대 VM 동시 복제 가능** (스케일아웃 어플라이언스 사용). <br>포털에서는 한 번에 10대까지 선택 가능 → 더 복제하려면 10대 단위 배치 추가 | 복제 어플라이언스 스케일링을 통해 용량 확장                                                      |
-| **어플라이언스 배포**         | 온프렘에 **Azure Migrate 어플라이언스** 배포                                                                                           | 온프렘에 **Azure Migrate Replication 어플라이언스** 배포                                  |
-| **Site Recovery 호환성** | 호환됨                                                                                                                        | 이미 Site Recovery로 복제 중인 VM은 Migration & modernization 도구로 복제 불가               |
-| **대상 디스크**            | Managed Disk                                                                                                               | Managed Disk                                                                  |
-| **디스크 제한**            | OS 디스크: 최대 2TB데이터 디스크: 최대 32TB최대 디스크 수: 60                                                                                 | OS 디스크: 최대 2TB데이터 디스크: 최대 32TB최대 디스크 수: 63                                    |
-| **패스스루 디스크**          | 지원 안 함                                                                                                                     | 지원                                                                            |
-| **UEFI 부팅**           | 지원                                                                                                                         | 지원                                                                            |
-| **네트워크 연결**           | - 공용 인터넷- ExpressRoute (Private Peering, Microsoft Peering)- Site-to-site VPN                                              | - 공용 인터넷- ExpressRoute (Private Peering, Microsoft Peering)- Site-to-site VPN |
+| Azure 권한          | Azure Migrate 프로젝트 생성 권한 및 어플라이언스 배포 시 만들어지는 Microsoft Entra 앱 등록 권한 필요                                                    | 구독에 대한 Contributor 권한 필요                                                  |
+| 복제(Replication)   | 단일 어플라이언스 기준, 여러 vCenter 서버에서 최대 500대 VM 동시 복제 가능 (스케일아웃 어플라이언스 사용). <br>포털에서는 한 번에 10대까지 선택 가능 → 더 복제하려면 10대 단위 배치 추가 | 복제 어플라이언스 스케일링을 통해 용량 확장                                                      |
+| 어플라이언스 배포         | 온프렘에 Azure Migrate 어플라이언스 배포                                                                                           | 온프렘에 Azure Migrate Replication 어플라이언스 배포                                  |
+| Site Recovery 호환성 | 호환됨                                                                                                                        | 이미 Site Recovery로 복제 중인 VM은 Migration & modernization 도구로 복제 불가               |
+| 대상 디스크            | Managed Disk                                                                                                               | Managed Disk                                                                  |
+| 디스크 제한            | OS 디스크: 최대 2TB데이터 디스크: 최대 32TB최대 디스크 수: 60                                                                                 | OS 디스크: 최대 2TB데이터 디스크: 최대 32TB최대 디스크 수: 63                                    |
+| 패스스루 디스크          | 지원 안 함                                                                                                                     | 지원                                                                            |
+| UEFI 부팅           | 지원                                                                                                                         | 지원                                                                            |
+| 네트워크 연결           | - 공용 인터넷- ExpressRoute (Private Peering, Microsoft Peering)- Site-to-site VPN                                              | - 공용 인터넷- ExpressRoute (Private Peering, Microsoft Peering)- Site-to-site VPN |
 
 ### Agentless
 
@@ -219,29 +219,29 @@ C. 스토리지 대기(PVC Pending)
 
 예상문제
 
-1. **Q. S2S VPN은 어떤 방식으로 암호화하나?**
-    A. **IPsec/IKE**. 필요 시 커스텀 정책(AES256/SHA2/PFS 등) 설정. 
+1. Q. S2S VPN은 어떤 방식으로 암호화하나?
+    A. IPsec/IKE. 필요 시 커스텀 정책(AES256/SHA2/PFS 등) 설정. 
     
-2. **Q. ExpressRoute는 기본적으로 암호화되나?**
-    A. **아니오**. 필요하면 **MACsec(ER Direct)** 또는 **IPsec over ER** 사용. 
+2. Q. ExpressRoute는 기본적으로 암호화되나?
+    A. 아니오. 필요하면 MACsec(ER Direct) 또는 IPsec over ER 사용. 
     
-3. **Q. 동-서(VM↔VM) 트래픽을 네트워크 계층에서 암호화하는 Azure 기능은?**
-    A. **Virtual Network Encryption(DTLS)**. 
+3. Q. 동-서(VM↔VM) 트래픽을 네트워크 계층에서 암호화하는 Azure 기능은?
+    A. Virtual Network Encryption(DTLS). 
     
-4. **Q. VNet Peering 간 트래픽은 암호화 필요한가?**
-    A. **필수 아님**(Microsoft 백본 사용, 암호화 요구 X). 필요 시 **VNE** 또는 앱 계층 TLS 적용. 
+4. Q. VNet Peering 간 트래픽은 암호화 필요한가?
+    A. 필수 아님(Microsoft 백본 사용, 암호화 요구 X). 필요 시 VNE 또는 앱 계층 TLS 적용. 
     
-5. **Q. MACsec은 어디서 쓸 수 있나?**
-    A. **ExpressRoute Direct 포트**에서 **L2 암호화**. 키는 **Key Vault**에 저장/회전. 
+5. Q. MACsec은 어디서 쓸 수 있나?
+    A. ExpressRoute Direct 포트에서 L2 암호화. 키는 Key Vault에 저장/회전. 
     
-6. **Q. VNE 활성화 시 주의할 점 2가지?**    
-    A. **지원 VM SKU+Accelerated Networking 필수**, 그리고 **ExpressRoute Gateway/App Gateway/Azure Firewall/Private Link와 비호환**. 
+6. Q. VNE 활성화 시 주의할 점 2가지?    
+    A. 지원 VM SKU+Accelerated Networking 필수, 그리고 ExpressRoute Gateway/App Gateway/Azure Firewall/Private Link와 비호환. 
     
-7. **Q. Azure Files의 전송 중 암호화는?**    
-    A. **SMB 3.x 암호화(기본 강제)**. 
+7. Q. Azure Files의 전송 중 암호화는?    
+    A. SMB 3.x 암호화(기본 강제). 
 
-8. **Q. P2S에서 동시접속 제한이 있는 프로토콜은? 대안은?**
-    A. **SSTP(128 세션)** 제한. **IKEv2 또는 OpenVPN**으로 전환.
+8. Q. P2S에서 동시접속 제한이 있는 프로토콜은? 대안은?
+    A. SSTP(128 세션) 제한. IKEv2 또는 OpenVPN으로 전환.
 
 ## AKS의 이슈상황 원인과 대응방안 역량: POD Faile, FackOff, POD Schedule Design, Nodegroup scale in 시 고래해야할 POD Life Cycle 설정
 
@@ -261,17 +261,17 @@ kubectl logs <POD> -n <NS> -c <CONTAINER> --previous
 ### POD Failed
 
 #### 흔한 원인 
-- **OOMKilled / Memory cgroup** 초과
-- **Evicted**(DiskPressure/EphemeralStorage/MemoryPressure)
-- **DeadlineExceeded** (Job activeDeadlineSeconds 초과)
-- **Exit code ≠ 0** (프로세스 조기 종료, entrypoint 오타, 권한 문제)
+- OOMKilled / Memory cgroup 초과
+- Evicted(DiskPressure/EphemeralStorage/MemoryPressure)
+- DeadlineExceeded (Job activeDeadlineSeconds 초과)
+- Exit code ≠ 0 (프로세스 조기 종료, entrypoint 오타, 권한 문제)
 
 
 #### 대응 방법
-- **OOMKilled**: 🧭 resources.requests/limits 합리화, 메모리 leak 점검, **VPA/HPA** 도입, GC/힙 옵션 조정
-- **Evicted**: 노드 **DiskPressure**해소(이미지/컨테이너/워킹디렉 정리), **ephemeral-storage** requests/limits 및 emptyDir.sizeLimit 설정, 노드풀 디스크/사이즈 증설
-- **Job 실패**: backoffLimit, activeDeadlineSeconds, 재시도 간격 재설계. 반복 실패면 **InitContainer로 프리체크**, 종속 서비스 준비(health/endpoint) 확인
-- **권한·엔트리포인트**: securityContext, command/args 검증, 실행 비사용자(shell) 문제 해결
+- OOMKilled: 🧭 resources.requests/limits 합리화, 메모리 leak 점검, VPA/HPA 도입, GC/힙 옵션 조정
+- Evicted: 노드 DiskPressure해소(이미지/컨테이너/워킹디렉 정리), ephemeral-storage requests/limits 및 emptyDir.sizeLimit 설정, 노드풀 디스크/사이즈 증설
+- Job 실패: backoffLimit, activeDeadlineSeconds, 재시도 간격 재설계. 반복 실패면 InitContainer로 프리체크, 종속 서비스 준비(health/endpoint) 확인
+- 권한·엔트리포인트: securityContext, command/args 검증, 실행 비사용자(shell) 문제 해결
 
 
 ### BackOff 계열(CrashLoopBackOff, ImagePullBackOff, ErrImagePull 등등..)
@@ -286,8 +286,8 @@ kubectl logs <POD> -n <NS> -c <CONTAINER> --previous
 
 #### B) ImagePullBackOff / ErrImagePull
 원인: 레지스트리 인증, 네트워크 혹은 이미지 태그 오타
-- ACR 사용 시 **AKS-ACR 연결(Managed Identity attach-acr)**, 또는 imagePullSecrets 설정
-- 프록시/NSG/DNS 확인, 사설 레지스트리면 **프라이빗 엔드포인트/방화벽** 예외
+- ACR 사용 시 AKS-ACR 연결(Managed Identity attach-acr), 또는 imagePullSecrets 설정
+- 프록시/NSG/DNS 확인, 사설 레지스트리면 프라이빗 엔드포인트/방화벽 예외
 - 태그 고정(immutable), imagePullPolicy: IfNotPresent 적절히 사용
 
 ### C) CreateContainerConfigError / CreateContainerError
@@ -298,7 +298,7 @@ Scale-in 시 연결 드레이닝, 데이터 무결성 보장이 중요합니다.
 
 핵심 체크리스트는 아래와 같습니다.
 
-1. **Pod Disruption Budget(PDB)**: 과도한 동시 축출 방지
+1. Pod Disruption Budget(PDB): 과도한 동시 축출 방지
 	```bash
 	spec: { maxUnavailable: 1 }   # 또는 minAvailable
 	```
@@ -348,11 +348,11 @@ Scale-in 시 연결 드레이닝, 데이터 무결성 보장이 중요합니다.
 
 Preminum은 티어가 아닌 성능 계층으로 티어는 Hot, Cool, Cold, Archive 네 가지 종류가 있다고 봐야 합니다.
 
-- **Hot**: 빈번한 읽기/쓰기. 단가 높음 , 액세스 비용은 낮음. 일반 운영 데이터.
-- **Cool**: 가끔 접근(>30일). 저장 단가 낮음, **최소 보관 30일** 및 **조기 삭제 비용** 있음. **단기 보관/백업**.
-- **Cold**: Cool보다 더 드문 접근(>90일). 저장 단가 더 ↓, 최소 보관 90일. 장기 보관(준아카이브).
-- **Archive**: 보관 전용(>180일 가정). 읽기 전 Rehydrate 필요, 지연 큼. 최저가 장기 보존.
-- **Premium(블록 Blob Premium)**: SSD 기반 고성능·낮은 지연, 비용은 높음. 핫 워크로드에 한정.
+- Hot: 빈번한 읽기/쓰기. 단가 높음 , 액세스 비용은 낮음. 일반 운영 데이터.
+- Cool: 가끔 접근(>30일). 저장 단가 낮음, 최소 보관 30일 및 조기 삭제 비용 있음. 단기 보관/백업.
+- Cold: Cool보다 더 드문 접근(>90일). 저장 단가 더 ↓, 최소 보관 90일. 장기 보관(준아카이브).
+- Archive: 보관 전용(>180일 가정). 읽기 전 Rehydrate 필요, 지연 큼. 최저가 장기 보존.
+- Premium(블록 Blob Premium): SSD 기반 고성능·낮은 지연, 비용은 높음. 핫 워크로드에 한정.
     
 
 ### 3) 라이프사이클 관리
@@ -364,8 +364,8 @@ Preminum은 티어가 아닌 성능 계층으로 티어는 Hot, Cool, Cold, Arch
 ### 4) 이벤트 드리븐 관리
 Azure에 존재하는 이벤트 드리븐 서비스와 각 서비스의 사용 패턴
 
-| **서비스**         | 역할                                         | 자주 쓰이는 패턴                                           | 전달 방식                                   | 보관·재생                                     | 결론                                            |
+| 서비스         | 역할                                         | 자주 쓰이는 패턴                                           | 전달 방식                                   | 보관·재생                                     | 결론                                            |
 | --------------- | ------------------------------------------ | --------------------------------------------------- | --------------------------------------- | ----------------------------------------- | --------------------------------------------- |
-| **Event Grid**  | Azure/앱에서 발생한 **이벤트(상태 변화)**를 **구독자에게 푸시** | Blob 업로드 알림→함수 트리거, 리소스 생성/태깅 자동화, IoT MQTT Pub/Sub | **푸시형 Pub/Sub** (HTTP & **MQTT** 브로커)   | 이벤트 자체 보관 X(짧은 재시도/Dead-letter), 스트림 재생 X | “**무언가 발생했다**”에 빠르게 반응하는 **오케스트레이션**에 최적.     |
-| **Event Hubs**  | 디바이스/앱/로그의 **연속 스트림**을 **대량 수집**           | 테레메트리/클릭스트림/로그→(Spark/ADX/ASA) 실시간 처리               | **풀형 스트림**(소비자가 **오프셋 관리**, 파티션/컨슈머 그룹) | **보존(시간/용량)** + **재생 가능**(리플레이)           | “**많이, 빠르게, 끊임없이 들어오는 데이터**”의 **빅데이터 파이프라인**. |
-| **Service Bus** | **엔터프라이즈 메시징**(큐/토픽, 순서/세션/거래/지연/필터)       | 주문·결제·워크플로, 사내 시스템 간 신뢰 전송                          | 브로커 저장 후 **소비자 준비되면 전달**                | **DLQ/중복감지/세션/FIFO**로 신뢰성↑                | “**유실·중복·순서**에 민감한 **업무 메시지**”에 적합.           |
+| Event Grid  | Azure/앱에서 발생한 이벤트(상태 변화)를 구독자에게 푸시 | Blob 업로드 알림→함수 트리거, 리소스 생성/태깅 자동화, IoT MQTT Pub/Sub | 푸시형 Pub/Sub (HTTP & MQTT 브로커)   | 이벤트 자체 보관 X(짧은 재시도/Dead-letter), 스트림 재생 X | “무언가 발생했다”에 빠르게 반응하는 오케스트레이션에 최적.     |
+| Event Hubs  | 디바이스/앱/로그의 연속 스트림을 대량 수집           | 테레메트리/클릭스트림/로그→(Spark/ADX/ASA) 실시간 처리               | 풀형 스트림(소비자가 오프셋 관리, 파티션/컨슈머 그룹) | 보존(시간/용량) + 재생 가능(리플레이)           | “많이, 빠르게, 끊임없이 들어오는 데이터”의 빅데이터 파이프라인. |
+| Service Bus | 엔터프라이즈 메시징(큐/토픽, 순서/세션/거래/지연/필터)       | 주문·결제·워크플로, 사내 시스템 간 신뢰 전송                          | 브로커 저장 후 소비자 준비되면 전달                | DLQ/중복감지/세션/FIFO로 신뢰성↑                | “유실·중복·순서에 민감한 업무 메시지”에 적합.           |
