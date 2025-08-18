@@ -2,7 +2,7 @@
 
 ## Dockerfile
 
-도커파일에서는 이미지 레이어 부분이 중요하다고 설명 들었습니다. 따라서 기본적인 도커파일 개념과 이미지 레이어에 대해서 설명합니다.
+**도커파일에서는 이미지 레이어 부분이 중요하다고 설명 들었습니다. 따라서 기본적인 도커파일 개념과 이미지 레이어에 대해서 설명합니다.**
 
 Dockerfile은 소스코드를 빌드하기 위한 명령어가 포함된 텍스트 파일입니다.
 
@@ -70,13 +70,13 @@ RUN apt-get update && apt-get install -y openssl nginx && rm -rf /var/lib/apt/li
 
 ## Support VM OS SKU 및 Migration 방법
 
-OS별로 SKU가 있으며 Migration 과정에서 제약사항이 있는데 해당 부분이 중요하다고 설명 들었습니다.
+**OS별로 SKU가 있으며 Migration 과정에서 제약사항이 있는데 해당 부분이 중요하다고 설명 들었습니다.**
 
 VMWare를 Azure로 Migration하게 되면 Agent, Agentless방식 두 가지중에 선택 가능합니다.
 
-- Agentless (권장/기본, VMware 전용)
+- **Agentless (권장/기본, VMware 전용)**
 	- vCenter + VMware 스냅샷/CBT로 증분 복제. 게스트 OS에 설치 없음. 대규모(최대 300~500대 동시)까지 스케일아웃 어플라이언스로 확장. 일부 제한(예: VMDK 이름에 비-ASCII 문자가 있으면 미지원)
-- Agent (대안)
+- **Agent (대안)**
 	- 각 서버에 Mobility Service를 설치해 블록 단위로 거의 연속 복제. 온프레미스 VMware는 물론 물리 서버·타 클라우드(AWS/GCP) 이전에도 사용. 포트/구성요소(복제 어플라이언스/프로세스 서버/443·9443 등) 요건이 있음.
 
 [마이그레이션 옵션 선택 방법](https://learn.microsoft.com/ko-kr/azure/migrate/server-migrate-overview?view=migrate-classic)
@@ -92,7 +92,7 @@ VMWare를 Azure로 Migration하게 되면 Agent, Agentless방식 두 가지중�
 | 디스크 제한            | OS 디스크: 최대 2TB데이터 디스크: 최대 32TB최대 디스크 수: 60                                                                                 | OS 디스크: 최대 2TB데이터 디스크: 최대 32TB최대 디스크 수: 63                                    |
 | 패스스루 디스크          | 지원 안 함                                                                                                                     | 지원                                                                            |
 | UEFI 부팅           | 지원                                                                                                                         | 지원                                                                            |
-| 네트워크 연결           | - 공용 인터넷- ExpressRoute (Private Peering, Microsoft Peering)- Site-to-site VPN                                              | - 공용 인터넷- ExpressRoute (Private Peering, Microsoft Peering)- Site-to-site VPN |
+| 네트워크 연결           | 인터넷- ExpressRoute (Private Peering, Microsoft Peering) - Site-to-site VPN                                              | 인터넷 - ExpressRoute (Private Peering, Microsoft Peering) - Site-to-site VPN |
 
 ### Agentless
 
@@ -208,7 +208,7 @@ C. 스토리지 대기(PVC Pending)
 
 ## Azure Network의 암호화 방식 단답식
 
-담당님도 잘 모르는 부분이라고 설명하셔서 힌트가 별로 없음. 이외에 아시는 내용이 있으면 알려주시면 감사하겠습니다.
+**담당님도 잘 모르는 부분이라고 설명하셔서 힌트가 별로 없음. 이외에 아시는 내용이 있으면 알려주시면 감사하겠습니다.**
 
 1. Azure VPN Gateway는 IPsec/IKE 기반 암호화 터널을 사용하며, 내부적으로 AES256/SHA2/PFS 같은 알고리즘을 조합한다
 2. 2. ExpressRoute → 기본은 암호화 없음. 필요 시
@@ -313,19 +313,17 @@ Scale-in 시 연결 드레이닝, 데이터 무결성 보장이 중요합니다.
 	```
 3. readinessProbe 엄격화: 종료 직전 트래픽 유입 차단 속도를 높이고 정상 동작 중에만 Ready 유지
 4. PDB + HPA 조합: 축출 가능한 파드 수와 자동 확장 균형 맞추기
-5. safe-to-evict 어노테이션: 스케일인 시 지우면 안되는 파드에
+5. safe-to-evict 어노테이션: 스케일인 시 지우면 안되는 파드에 다음과 같이 safe-to-evict 어노테이션 추가
 	```bash
 	metadata:
 	  annotations:
         cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
 	```
-	다음과 같이 safe-to-evict 어노테이션 추가
 6. 빈약한 스테이트풀 방지: StatefulSet은 PodManagementPolicy=Parallel와 PodAntiAffinity로 분산, 스토리지는 RWO/PV 바인딩 존 일치.
-
-
 
 ## 용도에 따른 Azure Storage Account 선택
 
+**많은 문제 출제가 예상된다고 한 부분으로 내용이 지속적으로 추가될 예정입니다.**
 
 ### 1) 스토리지 어카운트가 제공하는 주요 서비스
 
