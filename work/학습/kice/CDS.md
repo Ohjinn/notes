@@ -109,6 +109,26 @@ VMWare를 Azure로 Migration하게 되면 Agent, Agentless방식 두 가지중�
 
 ## AKS 장애 대응:Node Not Ready, POD Pending 등 이슈 원인 파악 및 대응방법 이해
 
+AKS는 작업자 노드의 상태를 지속적으로 모니터링하고 비정상상태가 되면 노드를 자동 복구하며 두 가지 이중화된 방법으로 상태를 체크합니다.
+
+- .status 업데이트: kubelet이 주기적으로 Node의 리소스 상태를 API 서버에 업데이트
+- Lease 객체: kubelet이 10초마다 Lease 객체를 갱신
+
+### 자동 복구 작동 방법
+AKS가 5분 이상 비정상으로 유지되는 노드를 식별하는 경우 다음 작업을 수행
+
+- AKS가 노드를 다시 부팅
+- 부팅 후 노드가 비정상이라면 AKS는 노드를 이미지로 다시 설치
+- 이미지 설치 후 노드가 비정상이고 Linux 노드인 경우 AKS가 노드를 다시 배포
+- 위 과정은 최대 3회 다시 시도
+
+#### 자동 복구가 수행되지 않는 경우
+- 네트워크 구성 오류로 노드 상태가 들어오지 않을 때
+- 노드가 처음에 정상 노드로 등록하지 못한 경우
+- 노드에 다음 taint중 하나가 있는 경우
+  - node.cloudprovider.kubernetes.io/shutdownToBeDeletedByClusterAutoscaler
+- 노드가 업그레이드 중인 경우
+
 
 ### Node Not Ready 원인 및 대응 방법
 - kubectl get nodes 에 NotReady 표기
