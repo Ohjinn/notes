@@ -114,7 +114,7 @@ AKS는 작업자 노드의 상태를 지속적으로 모니터링하고 비정�
 - .status 업데이트: kubelet이 주기적으로 Node의 리소스 상태를 API 서버에 업데이트
 - Lease 객체: kubelet이 10초마다 Lease 객체를 갱신
 
-### 자동 복구 작동 방법
+### Node 자동 복구 작동 방법
 AKS가 5분 이상 비정상으로 유지되는 노드를 식별하는 경우 다음 작업을 수행
 
 - AKS가 노드를 다시 부팅
@@ -129,6 +129,7 @@ AKS가 5분 이상 비정상으로 유지되는 노드를 식별하는 경우 �
   - node.cloudprovider.kubernetes.io/shutdownToBeDeletedByClusterAutoscaler
 - 노드가 업그레이드 중인 경우
 
+자동 복구 이벤트는 [링크](https://learn.microsoft.com/ko-kr/azure/aks/node-auto-repair)에서 확인 가능
 
 ### Node Not Ready 원인 및 대응 방법
 - kubectl get nodes 에 NotReady 표기
@@ -224,44 +225,7 @@ AKS가 5분 이상 비정상으로 유지되는 노드를 식별하는 경우 �
    - 리소스 쿼터 부족
 
 
-## Azure Network의 암호화 방식 단답식
-
-**담당님도 잘 모르는 부분이라고 설명하셔서 힌트가 별로 없음. 이외에 아시는 내용이 있으면 알려주시면 감사하겠습니다.**
-
-1. Azure VPN Gateway는 IPsec/IKE 기반 암호화 터널을 사용하며, 내부적으로 AES256/SHA2/PFS 같은 알고리즘을 조합한다
-2. ExpressRoute → 기본은 암호화 없음. 필요 시
-    - MACsec(L2) : ExpressRoute Direct서 포트 단 암호화(BYOK, Key Vault 보관).
-    - IPsec over ER : VPN over ExpressRoute(끝단 간 L3 암호화) 조합 가능.
-3. Virtual Network Encryption (VNE) → 동일 VNet/피어링 간 VM↔VM 트래픽을 DTLS로 암호화. 특정 VM SKU/Accelerated Networking 요구, 일부 네트워크 리소스와 비호환.
-4. Azure Files: 기본적으로 SMB 3.x + 암호화 필수(암호화 미지원 클라이언트 연결 거부)
-
-예상문제
-
-1. Q. S2S VPN은 어떤 방식으로 암호화하나?  
-    A. IPsec/IKE. 필요 시 커스텀 정책(AES256/SHA2/PFS 등) 설정. 
-    
-2. Q. ExpressRoute는 기본적으로 암호화되나?  
-    A. 아니오. 필요하면 MACsec(ER Direct) 또는 IPsec over ER 사용. 
-    
-3. Q. 동-서(VM↔VM) 트래픽을 네트워크 계층에서 암호화하는 Azure 기능은?  
-    A. Virtual Network Encryption(DTLS). 
-    
-4. Q. VNet Peering 간 트래픽은 암호화 필요한가?  
-    A. 필수 아님(Microsoft 백본 사용, 암호화 요구 X). 필요 시 VNE 또는 앱 계층 TLS 적용. 
-    
-5. Q. MACsec은 어디서 쓸 수 있나?  
-    A. ExpressRoute Direct 포트에서 L2 암호화. 키는 Key Vault에 저장/회전. 
-    
-6. Q. VNE 활성화 시 주의할 점 2가지?      
-    A. 지원 VM SKU+Accelerated Networking 필수, 그리고 ExpressRoute Gateway/App Gateway/Azure Firewall/Private Link와 비호환. 
-    
-7. Q. Azure Files의 전송 중 암호화는?    
-    A. SMB 3.x 암호화(기본 강제). 
-
-8. Q. P2S에서 동시접속 제한이 있는 프로토콜은? 대안은?  
-    A. SSTP(128 세션) 제한. IKEv2 또는 OpenVPN으로 전환.
-
-## AKS의 이슈상황 원인과 대응방안 역량: POD Faile, FackOff, POD Schedule Design, Nodegroup scale in 시 고래해야할 POD Life Cycle 설정
+## AKS의 이슈상황 원인과 대응방안 역량: POD Failed, BackOff, POD Schedule Design, Nodegroup scale in 시 고래해야할 POD Life Cycle 설정
 
 이슈상황시 각 node, pod, event 관련 상태 확인 명령어
 ```bash
@@ -308,8 +272,33 @@ kubectl logs <POD> -n <NS> -c <CONTAINER> --previous
 - 프록시/NSG/DNS 확인, 사설 레지스트리면 프라이빗 엔드포인트/방화벽 예외
 - 태그 고정(immutable), imagePullPolicy: IfNotPresent 적절히 사용
 
-### C) CreateContainerConfigError / CreateContainerError
+#### C) CreateContainerConfigError / CreateContainerError
 위의 pod pending과 동일한 대응을 통해 예방 가능
+
+### POD 스케줄러 오류 문제 해결
+
+#### 1. Volume node affinity conflict
+
+원인: Persistent Volume이 특정 노드에 대한 nodeAffinity를 지정했지만 해당 라벨과 일치하는 노드가 없는 경우
+
+- kubectl get pv <pv-name> -o yaml로 PV의 nodeAffinity를 확인
+- kubectl get nodes --show-labels로 노드 라벨 확인
+- PV의 affinity와 일치하도록 노드에 라벨을 추가하거나 PV 설정을 수정
+
+### 2. Insufficient CPU
+
+원인: 요청된 파드 CPU가 노드 여유보다 많거나 전체 클러스터 리소스가 부족할 때
+
+- kubectl describe pod <pod-name>, kubectl describe nodes로 리로스 상태 확인
+- 노드풀에 더 큰 VM 또는 더 많은 노드 추가(az aks nodepool scale)
+- 필요에 따라 requests/limits 조정
+
+### 3. Untolerated Taints
+
+원인: 노드에 taint가 설정되어 있고 파드에 해당하는 toleration이 없으면 스케줄러가 해당 노드에 파드를 배치하지 않음
+
+- kubectl describe nodes로 taint 정보 확인
+- pod toleration에 해당 toleration을 추가하거나 노드의 taint 제거
 
 ### Nodegroup Scale-in시 고려할 Pod Lifecycle 설정
 Scale-in 시 연결 드레이닝, 데이터 무결성 보장이 중요합니다.
@@ -339,6 +328,43 @@ Scale-in 시 연결 드레이닝, 데이터 무결성 보장이 중요합니다.
 	```
 6. 빈약한 스테이트풀 방지: StatefulSet은 PodManagementPolicy=Parallel와 PodAntiAffinity로 분산, 스토리지는 RWO/PV 바인딩 존 일치.
 
+## Azure Network의 암호화 방식 단답식
+
+**담당님도 잘 모르는 부분이라고 설명하셔서 힌트가 별로 없음. 이외에 아시는 내용이 있으면 알려주시면 감사하겠습니다.**
+
+1. Azure VPN Gateway는 IPsec/IKE 기반 암호화 터널을 사용하며, 내부적으로 AES256/SHA2/PFS 같은 알고리즘을 조합한다
+2. ExpressRoute → 기본은 암호화 없음. 필요 시
+    - MACsec(L2) : ExpressRoute Direct서 포트 단 암호화(BYOK, Key Vault 보관).
+    - IPsec over ER : VPN over ExpressRoute(끝단 간 L3 암호화) 조합 가능.
+3. Virtual Network Encryption (VNE) → 동일 VNet/피어링 간 VM↔VM 트래픽을 DTLS로 암호화. 특정 VM SKU/Accelerated Networking 요구, 일부 네트워크 리소스와 비호환.
+4. Azure Files: 기본적으로 SMB 3.x + 암호화 필수(암호화 미지원 클라이언트 연결 거부)
+
+예상문제
+
+1. Q. S2S VPN은 어떤 방식으로 암호화하나?  
+    A. IPsec/IKE. 필요 시 커스텀 정책(AES256/SHA2/PFS 등) 설정. 
+    
+2. Q. ExpressRoute는 기본적으로 암호화되나?  
+    A. 아니오. 필요하면 MACsec(ER Direct) 또는 IPsec over ER 사용. 
+    
+3. Q. 동-서(VM↔VM) 트래픽을 네트워크 계층에서 암호화하는 Azure 기능은?  
+    A. Virtual Network Encryption(DTLS). 
+    
+4. Q. VNet Peering 간 트래픽은 암호화 필요한가?  
+    A. 필수 아님(Microsoft 백본 사용, 암호화 요구 X). 필요 시 VNE 또는 앱 계층 TLS 적용. 
+    
+5. Q. MACsec은 어디서 쓸 수 있나?  
+    A. ExpressRoute Direct 포트에서 L2 암호화. 키는 Key Vault에 저장/회전. 
+    
+6. Q. VNE 활성화 시 주의할 점 2가지?      
+    A. 지원 VM SKU+Accelerated Networking 필수, 그리고 ExpressRoute Gateway/App Gateway/Azure Firewall/Private Link와 비호환. 
+    
+7. Q. Azure Files의 전송 중 암호화는?    
+    A. SMB 3.x 암호화(기본 강제). 
+
+8. Q. P2S에서 동시접속 제한이 있는 프로토콜은? 대안은?  
+    A. SSTP(128 세션) 제한. IKEv2 또는 OpenVPN으로 전환.
+
 ## 용도에 따른 Azure Storage Account 선택
 
 **많은 문제 출제가 예상된다고 한 부분으로 내용이 지속적으로 추가될 예정입니다.**
@@ -346,18 +372,25 @@ Scale-in 시 연결 드레이닝, 데이터 무결성 보장이 중요합니다.
 ### 1) 스토리지 어카운트가 제공하는 주요 서비스
 
 - 디스크(Managed Disks)
-    - 주 용도: VM OS/데이터 디스크. IOPS/Throughput SLA가 필요할 때.
-    - 특성: VM에 attach해서 블록 장치처럼 사용. 스냅샷/백업/암호화/공유디스크 등.
-    
+  - 주 용도: VM OS/데이터 디스크. IOPS/Throughput SLA가 필요할 때.
+  - 특성: VM에 attach해서 블록 장치처럼 사용. 스냅샷/백업/암호화/공유디스크 등.
 - 파일(Azure Files)
-    - 주 용도: SMB/NFS 네트워크 파일 공유. 리프트&쉬프트, 앱 설정/로그 공유.    
-    - 티어: Transaction Optimized / Hot / Cool (Standard-HDD), Premium(FileStorage-SSD).
-    - 스냅샷, Azure AD/Entra ID 기반 인증, Azure File Sync 등.
-        
+  - 주 용도: SMB/NFS 네트워크 파일 공유. 리프트&쉬프트, 앱 설정/로그 공유.    
+  - 티어: Transaction Optimized / Hot / Cool (Standard-HDD), Premium(FileStorage-SSD).
+  - 스냅샷, Azure AD/Entra ID 기반 인증, Azure File Sync 등.
 - 오브젝트(Blob Storage)
-    - 주 용도: 비정형 데이터(이미지/동영상/로그/백업 등). HTTP/SDK로 접근.
-    - 컨테이너 단위로 보관(= 버킷 개념). 블록 blob 중심.
-    - Data Lake Storage Gen2(ADLS Gen2) = Blob에 Hierarchical Namespace+POSIX ACL을 더한 분석 지향 스토리지.
+  - 주 용도: 비정형 데이터(이미지/동영상/로그/백업 등). HTTP/SDK로 접근.
+  - 컨테이너 단위로 보관(= 버킷 개념). 블록 blob 중심.
+  - Data Lake Storage Gen2(ADLS Gen2) = Blob에 Hierarchical Namespace+POSIX ACL을 더한 분석 지향 스토리지.
+- Table Storage
+  - 단순한 구조의 IoT데이터, 사용자 프로필, 메타데이터 저장 등에 적합
+  - NoSQL Key-Value Storage
+  - 스키마리스 구조, 대규모 비정형 데이터 저장 가능
+- Queue Storage
+  - 분산시스템 간 비동기 메시징 용도 등
+  - 메시지 큐 서비스
+  - 최대 메시지 크기 64KB
+  
 
 
 ### 2) 오브젝트 스토리지의 티어와 용도
