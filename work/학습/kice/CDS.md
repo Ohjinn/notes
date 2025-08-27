@@ -2178,3 +2178,248 @@ jobs:
 * Site Recovery(Agent-based) OS·커널 상세 매트릭스(현대화 경험) 
 
 > 필요하면, 환경(버전/디스크/보안) 스냅샷을 알려주면 **Agentless/Agent-based 선택안**과 **사전 수정 체크리스트**를 바로 깔끔하게 뽑아줄게요.
+
+
+## Azure Functions 선택 가이드(Durable 포함) & Azure Disk Detach/리사이즈 영향
+
+### Azure Functions: 언제 **Durable**을 쓸까?
+
+#### 실행/호스팅 옵션 한눈에
+
+| 항목      | Consumption   | Premium          | Dedicated(앱 서비스/Isolated) |
+| ------- | ------------- | ---------------- | ------------------------- |
+| 콜드스타트   | 있음            | 거의 없음(프리워밍)      | 없음                        |
+| VNET 통합 | 제한적           | **네이티브 지원**      | 지원                        |
+| 장시간 실행  | 제한(기본 5\~10분) | **확장(무제한에 가까움)** | 확장                        |
+| 비용      | 사용량 기반        | 사용량+예약           | 고정형                       |
+
+> **Durable Functions**는 **상태/장시간/워크플로**가 필요한 경우에 적합하며, **Premium/Isolated** 플랜과 궁합이 좋습니다.
+
+#### Functions vs Durable Functions vs Logic Apps
+
+| 요구사항                                            | 권장                                                  |
+| ----------------------------------------------- | --------------------------------------------------- |
+| 단일 이벤트 처리(짧은 수명), 서버리스 핸들러                      | **Functions**(Timer/HTTP/Queue 등 트리거)               |
+| **장시간** 오케스트레이션, **상태 유지**, 단계적 비동기, **팬아웃/팬인** | **Durable Functions**(Orchestrator/Activity/Client) |
+| **시각적 워크플로**, SaaS 커넥터 다수, 낮은 코드 의존             | **Logic Apps**                                      |
+
+#### Durable Functions 핵심 패턴
+
+* **Function Chaining**: 순차 단계 실행(주문→결제→알림)
+* **Fan-out/Fan-in**: 병렬 실행 후 결과 집계(대량 이미지 처리)
+* **Async HTTP API**: 즉시 202 응답 + 상태 폴링 엔드포인트
+* **Monitor/Recurring**: 크론성 모니터링(외부 시스템 상태 체크)
+* **Human Interaction**: 휴먼 승인 이벤트까지 **일시중단/타임아웃**
+* **Saga/보상 트랜잭션**: 분산 단계 실패 시 보상 로직 실행
+* **Durable Entities**: 소규모 **키-상태** 액터(카운터/세션 상태)
+
+#### 트리거 선택 요령(요약)
+
+* **HTTP**: 동기 요청/짧은 처리, 장시간은 **Durable Async HTTP** 패턴
+* **Queue/Service Bus**: 백그라운드 작업, 재시도/사이드이펙트 안전
+* **Event Grid**: Blob 업로드/리소스 변경 등 **이벤트 구동**
+* **Timer**: 배치/스케줄 작업(대용량이면 Durable로 워크분할)
+
+
+## Terraform로 AKS 만들 때 “Pod 네트워크” 설정 잡는 법(문법·블록·패턴별 예시)
+
+### 목적
+
+* Terraform **기본 문법**(블록/변수/참조/for\_each 등)과
+* AKS 리소스에서 **Pod 네트워킹**을 제어하는 **정확한 위치와 문장**을 한 번에 정리합니다.
+* 시험에서 자주 묻는: **Overlay/Transparent(kubenet 포함)** 설정, **필드명 혼동 포인트**, **NAT egress 고정**까지 체크.
+
+---
+
+### Terraform 문법 초간단 요약
+
+* **블록 구조**: `resource`, `data`, `module`, `variable`, `output`, `locals`
+* **키=값 인자**: `name = "foo"`, 중첩은 **블록**으로 표현
+* **참조**: `resource.type.name.attr` (예: `azurerm_subnet.aks.id`)
+* **변수**:
+
+  ```hcl
+  variable "location" { type = string; default = "koreacentral" }
+  ```
+
+  사용: `var.location`
+* **for\_each / count**: 반복 생성
+
+  ```hcl
+  resource "azurerm_resource_group" "rg" {
+    for_each = toset(["dev","prod"])
+    name     = "rg-${each.key}"
+    location = var.location
+  }
+  ```
+* **동적 블록**:
+
+  ```hcl
+  dynamic "tags" {
+    for_each = local.common_tags
+    content { key = tags.key value = tags.value }
+  }
+  ```
+
+---
+
+### “어디에 쓰나?” — AKS의 **Pod 네트워크**는 여기서 설정
+
+* 리소스: `resource "azurerm_kubernetes_cluster" "aks" { ... }`
+* 핵심: **`network_profile { ... }` 블록**
+  여기서 **CNI 종류, 모드, Pod/Service CIDR, Network Policy, Outbound 방식**을 지정합니다.
+* 노드 서브넷은 `default_node_pool { vnet_subnet_id = ... }` 에서 지정.
+
+> 시험 포인트: **`network_profile` 블록 유무/내용으로 “Pod 네트워크 설정 문장이 있는지”를 확인**할 수 있어야 함.
+
+---
+
+### 패턴 1) **Azure CNI Overlay** (Pod는 논리 IP, IP 절약·대규모에 적합)
+
+```hcl
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "aks-overlay"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  dns_prefix          = "aksovl"
+
+  default_node_pool {
+    name            = "system"
+    vm_size         = "Standard_D4s_v5"
+    node_count      = 3
+    vnet_subnet_id  = azurerm_subnet.aks_nodes.id   # 노드가 붙을 서브넷
+  }
+
+  identity { type = "SystemAssigned" }
+
+  network_profile {
+    network_plugin       = "azure"          # Azure CNI
+    network_plugin_mode  = "overlay"        # 오버레이 모드(= Pod 논리 IP)
+    pod_cidr             = "10.240.0.0/16"  # Pod 논리 대역(오버레이용)
+    service_cidr         = "10.0.0.0/16"
+    dns_service_ip       = "10.0.0.10"
+    network_policy       = "azure"          # 또는 "calico"
+    outbound_type        = "managedNATGateway"  # egress 고정(권장)
+  }
+}
+```
+
+* **키 포인트**: `network_plugin = "azure"`, `network_plugin_mode = "overlay"`, `pod_cidr` 사용.
+
+---
+
+### 패턴 2) **Azure CNI Transparent(Flat)** (Pod가 VNet 실IP를 직접 사용)
+
+```hcl
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "aks-flat"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  dns_prefix          = "aksflat"
+
+  default_node_pool {
+    name           = "system"
+    vm_size        = "Standard_D4s_v5"
+    node_count     = 3
+    vnet_subnet_id = azurerm_subnet.aks_pod.id     # ❗Pod가 여기 대역에서 IP를 소모
+  }
+
+  identity { type = "SystemAssigned" }
+
+  network_profile {
+    network_plugin       = "azure"           # Azure CNI
+    network_plugin_mode  = "transparent"     # Flat/Transparent
+    # ⚠ Pod CIDR 미사용. 서브넷 IP를 많이 잡아야 함.
+    service_cidr         = "10.1.0.0/16"
+    dns_service_ip       = "10.1.0.10"
+    network_policy       = "calico"
+    outbound_type        = "managedNATGateway"
+  }
+}
+```
+
+* **키 포인트**: `network_plugin_mode = "transparent"`이고 **Pod가 서브넷 실제 IP**를 사용 → **서브넷 IP 계획 필수**.
+
+---
+
+### 패턴 3) **kubenet** (점진 종료 예정 시나리오, 시험에 언급만)
+
+```hcl
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "aks-kubenet"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  dns_prefix          = "akskube"
+
+  default_node_pool {
+    name           = "system"
+    vm_size        = "Standard_D4s_v5"
+    node_count     = 3
+    vnet_subnet_id = azurerm_subnet.aks_nodes.id
+  }
+
+  identity { type = "SystemAssigned" }
+
+  network_profile {
+    network_plugin  = "kubenet"
+    pod_cidr        = "10.244.0.0/16"  # 노드에서 NAT
+    service_cidr    = "10.2.0.0/16"
+    dns_service_ip  = "10.2.0.10"
+    network_policy  = "calico"
+    outbound_type   = "managedNATGateway"
+  }
+}
+```
+
+* **요점**: Pod는 별도 사설망→노드가 NAT. 제한 및 미지원 사항이 많아 **신규는 비권장**.
+
+---
+
+### (보너스) NAT Gateway로 **egress IP 고정** 예시
+
+```hcl
+resource "azurerm_public_ip" "natgw_pip" {
+  name                = "pip-natgw"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+resource "azurerm_nat_gateway" "natgw" {
+  name                = "natgw-aks"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  sku_name            = "Standard"
+}
+
+resource "azurerm_nat_gateway_public_ip_association" "natgw_assoc" {
+  nat_gateway_id       = azurerm_nat_gateway.natgw.id
+  public_ip_address_id = azurerm_public_ip.natgw_pip.id
+}
+
+resource "azurerm_subnet_nat_gateway_association" "subnet_nat" {
+  subnet_id      = azurerm_subnet.aks_nodes.id  # 또는 Pod 서브넷(Transparent)
+  nat_gateway_id = azurerm_nat_gateway.natgw.id
+}
+```
+
+* AKS 쪽 `network_profile.outbound_type = "managedNATGateway"` 와 **동일/정합**하게 설계.
+
+---
+
+### 프로바이더/버전별 **필드명 혼동 주의**
+
+* `network_plugin_mode` ↔ 과거 예시의 `network_mode`
+* `service_cidr`(단수) ↔ 일부 버전/샘플의 `service_cidrs`(복수)
+* 결론: **사용 중인 azurerm 버전에 맞춘 스키마**를 확인하고, 팀 표준 모듈에서 **한 가지 표기**로 통일하세요.
+
+---
+
+### 체크리스트 (시험 대비)
+
+* [ ] AKS 리소스 안의 **`network_profile { ... }`** 유무로 **Pod 네트워크 설정**을 찾을 수 있는가?
+* [ ] Overlay ↔ Transparent의 차이(**`network_plugin_mode`**, IP 소비, `pod_cidr` 필요 여부) 설명 가능?
+* [ ] `network_policy`(azure/calico)와 `outbound_type`(managedNATGateway 등) 위치를 기억하는가?
+* [ ] 노드 서브넷은 **`default_node_pool.vnet_subnet_id`** 에서 지정한다는 점?
+* [ ] NAT Gateway 연동은 **서브넷 연결 + AKS outbound\_type**을 함께 본다?
