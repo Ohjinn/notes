@@ -769,3 +769,1412 @@ VM Resource:      /subscriptions/.../resourceGroups/rg-app/providers/Microsoft.C
 4. **부팅 Pull**: cloud-init/Ext가 **버전 고정 아티팩트**&시크릿 pull
 5. **검증/트래픽 전환**: 배치별 헬스 OK → 전체 반영
 
+## 엔터프라이즈용 하이브리드 DNS: Azure DNS Private Resolver/Private DNS + 포워딩/방화벽/프로토콜
+
+### 개요
+
+* 사내는 **내부 도메인(예: corp.local)** 을, 퍼블릭 클라우드(Azure)는 **사설 네임해결(ADLS/Privatelink 등)** 을 요구합니다.
+* **Azure DNS Private Resolver(이하 “Resolver”)** 와 **Azure Private DNS Zone** 을 조합해 **양방향 포워딩** 구조로 설계합니다.
+* 핵심은 **도메인별로 어디로 묻고(Conditional Forwarding), 트래픽이 어떤 경로/포트로 흐르는지** 를 명확히 하는 것.
+
+### 구성 요소
+
+* **Azure Private DNS Zone**: 사설 영역(authoritative). VNet에 **링크**하면 그 VNet 내 리소스가 해당 존을 질의/등록(옵션) 가능.
+* **Azure DNS Private Resolver**: 관리형 **재귀/포워딩** 리졸버.
+
+  * **Inbound Endpoint**(프라이빗 IP 할당): **온프렘→Azure** 질의 수신창구.
+  * **Outbound Endpoint**(+ **Forwarding Rule Set**): **Azure→온프렘/외부** 로 **조건부 포워딩** 수행.
+
+> 참고: 일부 리전은 지원 범위가 다를 수 있으니 **배포 전 지역 가용성**을 확인하세요(미지원 시 VM 기반 DNS 프록시 대안).
+
+---
+
+### 표준 아키텍처(허브-스포크 권장)
+
+#### 논리 흐름
+
+* **온프렘 → Azure 내부 도메인/Privatelink**: 온프렘 DNS(AD DS)가 **Azure Inbound Endpoint(프라이빗 IP)** 로 포워딩
+* **Azure → 온프렘 내부 도메인(corp.local)**: Resolver **Outbound Endpoint + 규칙**으로 **온프렘 DNS IP** 로 포워딩
+* **스포크 VNet**: Private DNS Zone **VNet 링크**(+ 필요 시 Auto-registration), **Forwarding Rule Set** 을 스포크와 연결
+
+#### 단계별 구성 순서
+
+1. **허브 VNet** 준비 → `sbn-dns-inbound`, `sbn-dns-outbound` 서브넷(권장: 전용 서브넷)
+2. **Resolver 배포**
+
+   * **Inbound Endpoint**: 사설 IP(1\~2개 이상) 할당
+   * **Outbound Endpoint**: 전용 서브넷에 연결
+3. **Forwarding Rule Set** 생성
+
+   * 예) `corp.local` → 온프렘 DNS `10.10.10.10, 10.10.20.10`
+   * Rule Set을 **필요 VNet(허브/스포크)** 에 **연결**
+4. **Private DNS Zone** 생성/연결
+
+   * 예) `privatelink.database.windows.net`, `internal.contoso.cloud`
+   * 허브/스포크 VNet에 **링크**, 필요 시 **Auto-registration**(VM만)
+5. **온프렘 DNS**(AD DS 등)에서 **Conditional Forwarder** 등록
+
+   * `*.privatelink.*`, `internal.*` 등 → **Azure Inbound Endpoint IP들**
+6. **방화벽/NSG 규칙** 적용(아래 섹션)
+7. **검증**: 온프렘/스포크 VM에서 `nslookup/dig` 로 상호 질의 테스트
+
+---
+
+### 방화벽/NSG 설계(포트/방향/대상)
+
+#### 포트·프로토콜 기본
+
+* **DNS 표준**: **UDP/53**(대부분 질의), **TCP/53**(대응 크기 초과/세그먼트 재전송/특정 기능)
+* **Zone Transfer(AXFR/IXFR)**: **TCP/53**(참고: **Azure Private DNS Zone은 외부 서버로 Zone 전송을 제공하지 않습니다**. 동기화는 포워딩/자동화로 해결)
+
+#### 트래픽별 규칙
+
+##### 1) 온프렘 DNS → Azure Inbound Endpoint
+
+* **온프렘 방화벽(→ Azure)**
+
+  * 목적지: **Inbound Endpoint의 사설 IP(들)**
+  * 프로토콜/포트: **UDP/53, TCP/53**
+  * 경로: **VPN/ExpressRoute** 내부 통신
+* **Azure NSG(Resolver Inbound 서브넷)**
+
+  * 소스: **온프렘 주소대역**
+  * 목적지: **Inbound Endpoint IP(들)**
+  * 포트: **UDP/53, TCP/53** 허용
+
+##### 2) Azure(Resolver Outbound) → 온프렘 DNS
+
+* **중요 메모(보완 사항)**
+
+  * **DNS 포워딩 시, Azure 쪽 소스가 “단일 IP”가 아니라 서비스 인프라의 ***IP 대역*** 으로 보일 수 있습니다.**
+  * 따라서 온프렘 방화벽은 **해당 \_대역\_에 대해 UDP/TCP 53을 허용** 해야 안정적입니다.
+  * **단일 소스 IP로만 화이트리스트** 해야 한다면 아래 **대안**(DNS 프록시/Firewall DNS Proxy)을 사용하세요.
+* **온프렘 방화벽(← Azure)**
+
+  * 소스: **Resolver Outbound의 서비스 IP 대역**(운영 정책상 허용 범위 확인/명시)
+  * 목적지: **온프렘 DNS IP(들)**
+  * 포트: **UDP/53, TCP/53**
+* **Azure NSG(Resolver Outbound 서브넷)**
+
+  * 목적지: **온프렘 DNS IP(들)**
+  * 포트: **UDP/53, TCP/53** 허용
+
+### “단일 소스 IP”만 허용해야 하는 경우(대안)
+
+* **대안 A: Azure Firewall의 DNS Proxy 사용**
+
+  * 스포크/허브의 클라이언트/Resolver가 **Firewall(프라이빗 IP: 53)** 로 질의 → Firewall이 **온프렘 DNS** 로 포워딩
+  * 온프렘 방화벽에는 **Firewall의 프라이빗 IP** 만 화이트리스트
+* **대안 B: DNS 프록시 VM(BIND/Unbound/Windows DNS)**
+
+  * 허브 VNet에 **고정 사설 IP** 로 DNS 프록시 배치 → Resolver의 포워딩 대상은 이 프록시 → 프록시가 온프렘으로 재포워딩
+  * 온프렘 방화벽엔 **프록시 IP** 한 개만 허용
+
+---
+
+### DNS 프로토콜/운영 포인트
+
+#### 프로토콜 요약
+
+* **쿼리/응답**: UDP/53 → 크기 초과 시 **TCP/53** 재시도(EDNS0 확장도 흔함)
+* **Zone Transfer(AXFR/IXFR)**: TCP/53(권한 있는 서버 간)
+
+  * **사설 존(Azure Private DNS Zone)** 은 **외부로 Zone Transfer 미지원** → **IaC/자동화** 로 데이터 관리
+* **암호화(DoT/DoH)**: 하이브리드 경로에선 일반적으로 **53/UDP/TCP** 사용(Resolver 기준)
+
+#### 운영 체크리스트
+
+* **TTL/캐시**: 변경 테스트 전 **DNS 캐시 플러시**(클라이언트/서버)
+* **우선순위**: 사설/공용 **Split-horizon** 충돌 주의(예: `example.com` 내부/외부 레코드 혼재)
+* **가용성**: Inbound Endpoint **2개 이상**(서브넷/존 분산), 온프렘 DNS **다중화**
+* **로그/모니터링**: 온프렘 DNS 로그, 네트워크 플로우(NSG Flow Logs/방화벽 로그), Resolver 진단 설정
+
+---
+
+### 흔한 설계 패턴
+
+#### 양방향 조건부 포워딩
+
+* 온프렘 DNS: `*.privatelink.*`, `internal.*` → **Azure Inbound IP들**
+* Resolver Rule: `corp.local` → **온프렘 DNS IP들**
+* 스포크 VNet은 **Rule Set 연결 + Private Zone 링크** 로 통일된 네임해결
+
+#### Split-horizon(내부/외부 동명이인)
+
+* `example.com`(공용)과 `internal.example.com`(사설)을 분리
+* 외부는 Public DNS, 내부는 Private DNS Zone + 포워딩
+
+---
+
+### 자주 묻는 질문(FAQ)
+
+#### Q. Private DNS Zone을 온프렘으로 **동기화(Zone Transfer)** 할 수 있나요?
+
+* A. **아니오.** Private DNS Zone은 외부로 AXFR/IXFR을 지원하지 않습니다. **존 데이터는 IaC/자동화** 로 관리하고, **해석은 포워딩** 으로 연결하세요.
+
+#### Q. 온프렘 방화벽은 정확히 무엇을 열어야 하나요?
+
+* A. **UDP/53, TCP/53** 입니다. 방향은 **온프렘→Azure Inbound IP들**, **Azure(Resolver Outbound 서비스 대역)→온프렘 DNS** 를 각각 허용하세요. **단일 IP 화이트리스트가 필요**하면 **DNS Proxy(Azure Firewall/VM)** 를 경유하세요.
+
+
+## AKS 모니터링 개요
+
+### 무엇을, 어디에, 어떻게 수집하나
+
+* **대상(What)**: 컨트롤 플레인 로그(kube-apiserver 등), 노드/파드/컨테이너 **메트릭**, 컨테이너 **로그(stdout/stderr)**, **Kubernetes 이벤트**, 앱 **텔레메트리(트레이스/의존성/예외)**.
+* **수집자(How)**: **Azure Monitor Agent(AMA)** 가 클러스터에 **DaemonSet/ReplicaSet** 형태로 배포되어 데이터를 모읍니다.
+* **저장소(Where)**:
+
+  * **Container Insights** → **Log Analytics Workspace(LAW)** 로 로그/일부 메트릭 적재(KQL 쿼리).
+  * **Managed Prometheus**(Azure Monitor for Prometheus) → 매니지드 시계열 저장(프로메테우스/PromQL).
+  * **Application Insights**(Workspace 기반) → 앱 레벨 텔레메트리(분산 트레이싱/성능).
+  * **진단 설정(Diagnostic Settings)** 선택 시 **Storage Account/Blob** 으로 **아카이브** 가능.
+
+> **메모 반영(중요):** Azure Monitor/Insights 활성화나 진단 설정 시 **Storage(Account/Blob)** 로 로그를 **아카이브**하도록 구성할 수 있습니다. **보존주기(보존일수) + 수명주기(티어 전환/삭제) 정책**을 **반드시 함께 설계**하세요.
+
+---
+
+### 구성 요소(리소스)와 역할
+
+#### Log Analytics Workspace(LAW)
+
+* KQL로 조회하는 **중앙 로그 저장소**. 컨테이너 로그(`ContainerLogV2`), K8s 이벤트/인벤토리, 일부 메트릭/상태 지표가 들어옵니다.
+* **보존 기간**(예: 30/90/365일)과 **데이터 내보내기**(Event Hub/Storage) 정책을 설정합니다.
+
+#### Azure Monitor Agent(AMA) & DCR/DCE
+
+* **AMA**: 에이전트 Pod(예: `ama-logs`, `ama-metrics`)가 **kube-system** 등에 배포됩니다.
+* **DCR(Data Collection Rule)**: “**무엇을**(테이블/카테고리) **어디서**(스코프/네임스페이스/노드셀렉터) **어떻게**(필터/변환)\*\* 수집할지” 정의.
+* **DCE(Data Collection Endpoint)**: 수집 엔드포인트(사설/공용) 정의. **프라이빗 링크(AMPLS)** 연계 시 필수.
+
+#### Container Insights
+
+* AKS 전용 모니터링 경험(노드/파드/컨테이너 헬스, 컨트롤플레인 상태, KubeEvents 등).
+* “**AKS 모니터링 애드온**”을 켜면 AMA + DCR이 붙고 LAW에 연결됩니다.
+
+#### Managed Prometheus & Managed Grafana(옵션)
+
+* **Prometheus** 스크랩을 매니지드로 제공(에이전트가 스크랩/전송).
+* **Managed Grafana** 로 대시보드 바로 연결(프로메테우스 데이터 소스).
+
+#### Application Insights(Workspace 기반)
+
+* 앱 코드(ASP.NET/Java/Node/Python 등)에 **OpenTelemetry/SDK** 삽입 → **분산 트레이스/요청/의존성/예외** 수집.
+* **Live Metrics**, **스마트 탐지**로 성능/오류 감지.
+
+#### Diagnostic Settings(클러스터/노드풀/리소스)
+
+* **컨트롤 플레인 로그/메트릭**(kube-apiserver, scheduler, controller-manager, cluster-autoscaler 등)을
+  **LAW / Event Hub / Storage** 로 전송(아카이브/SIEM 연동).
+
+#### Storage Account(아카이브/장기보관)
+
+* 진단 로그/메트릭 아카이브 용도로 사용. **컨테이너(Blob)** 에 원본 그대로 저장.
+* **수명주기 정책**으로 **Hot→Cool/Cold/Archive** 전환 및 **기간 경과 삭제** 자동화 가능.
+
+---
+
+### 라이프사이클(설치→운영→업데이트→폐기)
+
+#### 설치(Enable)
+
+1. AKS 생성 시 또는 사후에 **모니터링 애드온(Container Insights)** 활성화.
+2. LAW 선택/생성 → DCR/DCE 자동 생성 → **AMA Pod** 가 DaemonSet으로 배포.
+3. (옵션) **Managed Prometheus/Grafana** 활성화.
+4. (옵션) **Application Insights** 리소스 생성 후 앱에 **OTel/SDK** 적용.
+
+#### 운영(수집/조회/알림)
+
+* **KQL**(LAW)과 **PromQL**(Prometheus)로 탐색/대시보드 구성.
+* **Alert**: 로그 기반(Alert rule), 메트릭 기반(Alert rule) 설정 → Action Group(Webhook/ITSM/Teams/Email).
+* **보안/네트워크**:
+
+  * 공용 통신 시 **Monitor 수집/쿼리 엔드포인트**로의 **아웃바운드 허용** 필요.
+  * **사설 통신**은 **AMPLS(Azure Monitor Private Link Scope)** + **DCE/PE** 로 구성.
+
+#### 업데이트(Agent/Rule)
+
+* AMA/확장/애드온은 **클러스터 확장(Extension)** 으로 **롤링 업데이트**.
+* DCR은 코드(IaC)로 관리하여 **환경 간 일관성** 유지(파드/네임스페이스 필터 등).
+
+#### 폐기/정리
+
+* 애드온 비활성화/에이전트 제거 → 수집 중단.
+* **LAW/Storage 보존 기간** 지나면 자동 삭제되도록 정책 설정. **필요 데이터는 Export** 후 보관.
+
+---
+
+### 데이터 범주(무엇이 어디로 가는가)
+
+#### 로그/이벤트
+
+* **컨테이너 로그**: stdout/stderr → LAW(`ContainerLogV2`)
+* **Kubernetes 이벤트**: `KubeEvents`
+* **인벤토리**: `KubePodInventory`, `KubeNodeInventory`, `KubeServices` …
+
+#### 메트릭
+
+* **플랫폼 메트릭**(노드/노드풀/컨트롤플레인 일부): Azure Monitor 메트릭(MDM)
+* **애드온 메트릭/애플리케이션 메트릭**:
+
+  * Container Insights(LAW 기반 메트릭 테이블/뷰)
+  * 또는 **Managed Prometheus**(권장: 메트릭은 시계열에, 로그는 LAW에)
+
+#### 애플리케이션 텔레메트리
+
+* **Application Insights**(Workspace 기반): 요청/의존성/예외/트레이스/Live Metrics
+* **OpenTelemetry** 추천(벤더 중립, 추후 백엔드 전환 용이)
+
+---
+
+### 보존/비용/아카이브 설계(강조)
+
+#### 보존 정책
+
+* **LAW 보존**: 워크스페이스 단위(예 30\~730일). 테이블별 보존/차등 과금 가능.
+* **Application Insights(LAW 기반)**: 워크스페이스 보존을 따름.
+* **Prometheus**: 서비스 요금/보존 선택(대시보드/알람 고려).
+
+#### 아카이브(진단 → Storage)
+
+* **Diagnostic Settings** 로 **Storage Account**에 **원본 로그**를 장기보관.
+* **Storage 수명주기**:
+
+  * **N일 후 Cool/Cold/Archive**(티어 전환)
+  * **M일 후 삭제**
+  * **Append/Page 제약** 고려(대부분 Blob은 Block Blob로 저장)
+
+#### 비용 최적화 팁
+
+* **필터링 수집**(DCR에서 네임스페이스/컨테이너 라벨 기반 제외)로 **GB 수집량 절감**
+* 장기보관은 LAW 대신 **Storage 아카이브** + 필요 시 **On-Demand 조회 파이프라인**
+* 메트릭은 **Managed Prometheus**, 로그는 **LAW**로 역할 분리
+
+---
+
+### 네트워크/보안
+
+#### 프라이빗 수집(강추천)
+
+* **AMPLS + Private Endpoint** 로 Monitor 수집/쿼리 엔드포인트를 사설화.
+* AKS 서브넷 NSG/UDR 확인(방화벽 경유 시 **Azure Monitor FQDN 태그** 사용).
+
+#### 권한
+
+* AMA가 쓰는 **관리 ID**(클러스터/에이전트)에 LAW **Data Ingest** 권한.
+* 진단 설정(컨트롤 플레인 로그) 작성 권한: 구독/RG **Monitoring Contributor** 이상.
+
+---
+
+### 운영 팁(현업 체크리스트)
+
+#### 수집 스코프/노이즈 관리
+
+* **DCR**에서 **네임스페이스/라벨 기반 포함·제외**. 빌드/배치 파드 소음 최소화.
+* **High-Cardinality** 라벨(동적 UUID 등) 메트릭은 Prometheus에서 **리레이블/삭제**.
+
+#### 경보/런북
+
+* **PodRestart 폭증, OOMKilled, CrashLoopBackOff**, **API 서버 5xx**에 알람.
+* **진단 로그 누락/수집 실패**(에이전트 크래시/권한 오류) 알람 추가.
+
+#### 거버넌스(메모 연계)
+
+* **Azure Policy**로 “**모니터링 애드온 필수/진단 설정 필수**” 표준화(상위 MG/구독에서 강제).
+* **예외는 Exemption/NotScopes** 로 관리(교차 환경 혼선 방지).
+
+---
+
+### 빠른 절차(운영팀 핸즈온)
+
+#### 1) 애드온/LAW 연결
+
+* 포털/CLI로 **Container Insights** 활성화(기존 LAW 선택).
+* (옵션) **Managed Prometheus** + **Managed Grafana** 활성화.
+
+#### 2) DCR 최적화
+
+* 수집 제외(예: `kube-system`, `gatekeeper-system` 등) 또는 특정 라벨만 포함.
+* 컨테이너 로그 필드(시간/레벨/메시지) 추출 규칙 구성.
+
+#### 3) 진단 설정 + 스토리지
+
+* AKS 리소스 진단 설정: **LAW + Storage 아카이브** 동시 전송.
+* **Storage 수명주기 정책**: 30일 Hot → 60일 Cool → 180일 Archive → 365일 삭제(예시).
+
+#### 4) 알림
+
+* 메트릭/로그 알림 룰 + **Action Group**(Teams/ITSM/Webhook) 연결.
+* **쿼리 템플릿**(KQL/PromQL)과 런북 문서화.
+
+
+## Azure 메시징 선택 가이드: Kafka, Event Hubs, Service Bus, Event Grid, Storage Queue
+
+### 개요
+
+* **무엇을 고를까?**
+
+  * **Event Grid**: *이벤트 알림(reactive), 푸시, 팬아웃, 라우팅/필터링*
+  * **Event Hubs**: *스트리밍 수집(telemetry), 초고속 쓰기, 파티션, 소비자 그룹*
+  * **Service Bus**: *업무 메시징(command/workflow), 순서/중복방지/스케줄/트랜잭션/DLQ*
+  * **Storage Queues**: *단순·저비용 큐*
+  * **Kafka**: *풍부한 생태계·프로토콜 표준, 자체 운영(또는 Confluent) / Event Hubs의 **Kafka 호환 엔드포인트**로 대체 가능*
+
+> **요점**: “이벤트 알림”은 **Event Grid**, “스트리밍/로그”는 **Event Hubs**, “업무 메시징”은 **Service Bus**, “간단 큐”는 **Storage Queue**, “카프카가 표준인 조직/프레임워크”는 **Kafka 또는 Event Hubs(Kafka 프로토콜)**.
+
+---
+
+### 서비스별 핵심 개념
+
+#### Event Grid
+
+* **패턴**: *Push 기반 이벤트 라우팅(Pub/Sub)*
+* **특징**: 구독(Subscription)별 **필터/라우팅**, **재시도/Dead-letter**, 다수의 Azure 소스(Blob, Resource Events 등)와 호환
+* **사용처**: \*“무언가 발생했다”\*를 여러 소비자(Functions, Logic Apps, Webhook 등)에게 **즉시 알림/트리거**
+
+#### Event Hubs
+
+* **패턴**: *대량 스트리밍/로그 수집*
+* **특징**: **파티션**·**소비자 그룹**, “읽고 또 읽는” 스트림, **Capture**로 Blob/ADLS에 원본 적재, **Kafka 프로토콜 호환**(브로커 대체)
+* **사용처**: IoT/앱 로그/텔레메트리, Databricks/Synapse/ASA로 실시간 분석
+
+#### Service Bus (Queues/Topics)
+
+* **패턴**: *엔터프라이즈 메시징(명령/워크플로)*
+* **특징**: **세션(순서 보전/FIFO 유사), 중복 감지, 스케줄 발송, 지연 메시지, 트랜잭션, DLQ**, 구독 규칙(토픽)
+* **사용처**: 결제/주문/업무 플로우, **정확성/순서/보상 처리**가 중요한 B2B/백오피스
+
+#### Storage Queues
+
+* **패턴**: *경량 비동기 처리*
+* **특징**: 간단·저비용, 기능은 최소(순서/세션/트랜잭션 없음)
+* **사용처**: 보조 작업, 비용 민감 환경, 아주 단순한 비동기화
+
+#### Kafka (자체/Confluent) & Event Hubs(Kafka 호환)
+
+* **Kafka 자체(또는 Confluent Cloud/Platform)**: Connect/Streams/KSQL 등 **생태계 기능**이 꼭 필요하거나 **벤더 표준이 Kafka**인 조직
+* **Event Hubs의 Kafka 호환**: **브로커 주소만 교체**로 상당수 Kafka 클라이언트를 **비수정** 연결 가능(프로토콜=Kafka/TLS)
+
+---
+
+### 선택 기준(결정 트리)
+
+#### 1) 이벤트냐 메시지냐 스트림이냐?
+
+* **이벤트 알림/트리거**: **Event Grid**
+* **업무 메시지(명령/워크플로)**: **Service Bus**
+* **로그/텔레메트리 스트림**: **Event Hubs**
+* **진짜 단순 큐**: **Storage Queues**
+
+#### 2) 순서/중복/트랜잭션이 필요한가?
+
+* **필요함** → **Service Bus**(세션·중복감지·트랜잭션·DLQ)
+* **불필요/대량 스트림** → **Event Hubs**
+
+#### 3) Kafka 생태계에 의존?
+
+* **Kafka Connect/Streams 등 필수** → **Kafka(자체/Confluent)**
+* **그렇진 않지만 Kafka 클라를 유지** → **Event Hubs(Kafka 호환)**
+
+#### 4) 소비 모델
+
+* **푸시(웹훅/Functions 트리거)** → **Event Grid**
+* **풀(컨슈머가 오프셋 관리하며 읽음)** → **Event Hubs/Kafka/Service Bus**
+
+---
+
+### 네트워킹/보안(포트·엔드포인트·프라이빗)
+
+#### 네트워크 경유
+
+* **Event Grid**: **HTTPS 443**(웹훅/핸들러), 사설 필요 시 **Private Link(Endpoint)** 지원 대상 리소스 사용
+* **Event Hubs**: **AMQP 5671**, **AMQP over WebSockets 443**(프록시/방화벽 우회), **Kafka TLS 포트(일반적으로 9093)**
+* **Service Bus**: **AMQP 5671**, **AMQP over WebSockets 443**, REST 443
+* **Storage Queue**: HTTPS 443
+
+#### 프라이빗 액세스
+
+* **Event Hubs/Service Bus/Storage**: **Private Endpoint** 지원 → VNet 내부 전용 통신
+* **팔로업**: 사설 경로면 **DNS**(Private DNS Zone)와 **아웃바운드 라우팅**(NAT GW/Firewall) 동반 설계
+
+#### 인증/권한
+
+* **SAS 토큰**(키 기반), **Azure AD RBAC/토큰**(Managed Identity 권장)
+* **메시지 핸들러는 멱등성**: 최소 1회 전송/재시도에 대비
+
+> **운영 메모(보완 연계)**: *로그·진단은 Azure Monitor/Insights로 전송 가능하며, Storage(Blob)에 아카이브 시 **보존/수명주기 정책**을 반드시 설계하세요.*
+
+---
+
+### 운영·패턴별 설계
+
+#### Event-driven(알림/후행처리)
+
+* **Event Grid → Azure Functions/Logic Apps**
+* 구독별 **필터링(Subject/Prefix/Suffix)**, **Dead-letter**로 실패 이벤트 보존
+* *예*: Blob 업로드 → 이미지 처리(함수) → 결과 저장(앞서 다룬 “후행 처리 체인”)
+
+#### Streaming(텔레메트리/로그)
+
+* **Event Hubs → Stream Analytics/Spark/Databricks/Synapse**
+* **Capture**로 ADLS/Blob에 **원본 보관** → 거버넌스/재처리 용이(라이프사이클 정책 적용)
+
+#### Enterprise Messaging(명령/워크플로)
+
+* **Service Bus Queue/Topic**
+* **세션**으로 **FIFO 유사** 보장, **중복감지/스케줄/지연/트랜잭션/DLQ**
+* **사가(Saga)** / 보상 트랜잭션, **요청-응답**(코릴레이션), **리트라이** 정책
+
+#### Kafka 생태계가 기준
+
+* **자체/Confluent Kafka**: Connectors/Streams/KSQL 등 전체 스택 활용
+* **Event Hubs (Kafka 호환)**: 브로커 교체형 마이그레이션, Azure 관리형 스케일
+
+---
+
+### 비교 표(요약)
+
+| 항목           | Event Grid          | Event Hubs             | Service Bus | Storage Queue | Kafka(자체/Confluent)  |
+| ------------ | ------------------- | ---------------------- | ----------- | ------------- | -------------------- |
+| 주 용도         | 이벤트 알림/트리거          | 스트리밍 수집                | 업무 메시징      | 경량 큐          | 스트리밍(풀 스택)           |
+| 소비 모델        | Push(웹훅/함수)         | Pull(오프셋)              | Pull(큐/토픽)  | Pull          | Pull                 |
+| 순서/세션        | ✖️                  | 파티션 내 상대적 순서           | ✔️(세션)      | ✖️            | ✔️(파티션/키)            |
+| 트랜잭션         | ✖️                  | ✖️                     | ✔️          | ✖️            | ✔️                   |
+| 라우팅/필터       | ✔️(구독 필터)           | 소비자 그룹                 | ✔️(토픽+규칙)   | ✖️            | ✔️(토픽/스트림)           |
+| DLQ          | ✔️(Dead-letter 이벤트) | 컨슈머 구현                 | ✔️          | 제한적(가시성 타임아웃) | 컨슈머 구현               |
+| 네트워크 포트      | 443                 | 5671/443, (Kafka) 9093 | 5671/443    | 443           | 9092/9093 등          |
+| Private Link | 일부 시나리오             | ✔️                     | ✔️          | ✔️            | 자체 설계(프록시/프라이빗 클러스터) |
+
+> 표의 수치·상세 한도(사이즈/보존 등)는 SKU/지역에 따라 다르므로 **설계 시 최신 문서로 확인**하세요.
+
+---
+
+### 실전 선택 레시피
+
+1. **웹훅 기반 반응형 자동화** → **Event Grid + Functions**
+2. **수십\~수백 MB/s 텔레메트리** → **Event Hubs + Capture + 분석(ASA/Databricks)**
+3. **주문/결제 등 업무 플로우** → **Service Bus(세션/트랜잭션/DLQ)**
+4. **Kafka 표준 조직** → **Confluent/Azure VM/AKS Kafka** 또는 **Event Hubs(Kafka)**
+5. **아주 단순 비동기** → **Storage Queue**
+
+---
+
+### 네트워크/방화벽 체크리스트
+
+* **Event Hubs/Service Bus**:
+
+  * **AMQP 5671**(TLS), **AMQP over WebSockets 443**(프록시 환경), **Kafka 9093**(TLS)
+  * **Private Endpoint** 사용 시 **Private DNS** 및 **경로(UDR/NAT)** 확인
+* **Event Grid**: **443**(웹훅 핸들러), 구독 검증(Validation) 통과 필요
+* **아웃바운드 제어**: FQDN 기준 허용이 필요하면 **Azure Firewall**의 **FQDN 규칙** 사용(단순 NSG는 FQDN 불가)
+
+
+## AKS 오토스케일 총정리: Pod(HPA/KEDA/VPA) ↔ NodePool(Cluster Autoscaler/VMSS)
+
+### 왜 두 층을 구분해야 하나?
+
+* **Pod 오토스케일**은 **복제본 수**를 조정해 처리량/지연을 맞추고,
+* **Node 오토스케일**은 **VMSS 인스턴스 수**를 조정해 **스케줄 불가(Pending) Pod**를 수용합니다.
+* 흐름: **HPA/KEDA가 Pod 수 증가 → Pending 발생 → CA가 노드 증설**. 부하 하락 시 CA가 안전하게 축소.
+
+### 용어·구성요소 한 눈에
+
+* **HPA**: CPU/메모리/커스텀 지표 기반 **수평 Pod 스케일**
+* **KEDA**: 큐 길이·Kafka lag 등 **이벤트 지표**로 HPA를 **구동**
+* **VPA**: Pod의 **requests/limits**를 권고/자동 조정(수직)
+* **Cluster Autoscaler(CA)**: Pending Pod를 근거로 **NodePool(=VMSS) 증감**
+* **VMSS**: AKS NodePool의 실제 VM 풀
+
+### Pod 오토스케일
+
+#### HPA( Horizontal Pod Autoscaler )
+
+* **전제**: Pod에 **requests** 선언, **Metrics Server** 가동
+* **지표**: CPU/메모리 이용률, **외부/커스텀 지표**(Prometheus Adapter/KEDA)
+* **튜닝**: `stabilizationWindowSeconds`, `behavior.scaleUp/Down.policies`, `min/maxReplicas`
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-hpa
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: web }
+  minReplicas: 2
+  maxReplicas: 20
+  behavior:
+    scaleUp:   { stabilizationWindowSeconds: 60 }
+    scaleDown: { stabilizationWindowSeconds: 300 }
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+```
+
+#### KEDA( Event-Driven Autoscaling )
+
+* **역할**: `ScaledObject`가 **HPA를 생성/관리**
+* **장점**: 큐/토픽 길이 등으로 **정밀 스케일**
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata: { name: worker-sb }
+spec:
+  scaleTargetRef: { name: worker }
+  minReplicaCount: 0
+  maxReplicaCount: 50
+  triggers:
+    - type: azure-servicebus
+      metadata: { queueName: jobs, messageCount: "50", namespace: sb-namespace }
+```
+
+#### VPA( Vertical Pod Autoscaler )
+
+* **용도**: requests/limits **권고/자동 조정**
+* **주의**: HPA와 **같은 리소스**를 동시에 조정하지 않도록(출렁임 방지). 일반적으로 **HPA=복제 수**, **VPA=requests**.
+
+### NodePool(=VMSS) 오토스케일
+
+#### Cluster Autoscaler 트리거 조건
+
+* **증설**: 스케줄러가 배치 못해 **Pending** 발생
+* **축소**: **저활용 노드** 비우고 제거(PDB 준수)
+* **영향 요소**: **PDB**, **taint/toleration**, **node affinity**, **GPU/로컬SSD/특정 SKU/Zone** 요구
+
+#### AKS CA 프로파일(예시)
+
+* `scan-interval`(탐지 주기), `scale-down-delay-after-add`, `scale-down-unneeded-time`, `balance-similar-node-groups`
+
+```bash
+az aks update -g rg -n aks \
+  --cluster-autoscaler-profile scan-interval=20s \
+  scale-down-delay-after-add=10m \
+  scale-down-unneeded-time=10m \
+  balance-similar-node-groups=true
+```
+
+#### VMSS 관점 유의점
+
+* **서브넷 IP 여유**(Azure CNI/Overlay), **구독 vCPU/리소스 쿼터**, **리전/존 SKU 가용성**,
+* **이미지/부팅 초기화**: **ACG 이미지 + cloud-init/확장**으로 **최신 상태** 보장
+
+### 자주 발생하는 이슈와 해법
+
+#### HPA 쪽
+
+* **증설 안 됨**: `requests` 없음 / Metrics Server 오류 / 커스텀 지표 매핑 불일치
+* **과민 스케일**: `stabilizationWindow`/정책 완화
+* **콜드스타트**: `initialDelaySeconds` 조정 + **오버프로비저닝**(낮은 우선순위 placeholder)
+
+#### KEDA 쪽
+
+* **인증 실패**: MI/연결문자열 권한
+* **지표 해석**: 트리거 스펙과 실제 메트릭 **단위/이름** 일치
+
+#### CA/노드 쪽
+
+* **Pending인데 증설 안 함**: taint/affinity/리소스/볼륨 조건 충돌, **맞는 Pool 부재**, IP/Quota/SKU 부족
+* **축소 안 됨**: 고정 Pod/로컬 상태/PDB 제약, 축소 지연 파라미터 과도
+
+### 실전 설계 레시피
+
+#### 1) 기준값 정하기
+
+* **HPA** 목표 이용률(예: CPU 60\~70%), `min/maxReplicas`, **stabilizationWindow**
+* **KEDA** 큐/lag 임계값에 **SLA 반영**
+* **CA** 프로파일로 **확장 민감도↑/축소 안정성↑**
+
+#### 2) 노드풀 분리
+
+* 역할별 Pool(일반/메모리/GPU/스팟) + **taint/toleration** 라우팅
+
+#### 3) 오버프로비저닝 패턴
+
+* **낮은 priorityClass** 의 placeholder를 상시 유지 → 급증 시 즉시 수용, CA가 뒤따라 증설
+
+#### 4) VMSS 최신화
+
+* **ACG(Compute Gallery)** 버전 관리 + **롤링 업그레이드** + **Application Health** probe
+
+#### 5) 네트워크·보안
+
+* **NAT Gateway** 로 egress IP 고정(외부 화이트리스트)
+* **NSG 최소 허용**
+* 모니터링/아카이브는 **Azure Monitor/Container Insights/Prometheus** + **Storage 보존·수명주기 정책** 함께 설계
+
+### 빠른 체크리스트
+
+#### HPA/KEDA
+
+* [ ] Pod **requests/limits**
+* [ ] Metrics Server/Adapter 정상
+* [ ] HPA **stabilization/behavior**
+* [ ] KEDA 트리거 권한/지표 매핑
+
+#### Cluster Autoscaler/NodePool
+
+* [ ] Pool **min/max** 및 **CA 활성화**
+* [ ] **서브넷 IP/Quota/SKU** 사전 점검
+* [ ] **taint/affinity/PDB** 점검
+* [ ] **CA 프로파일** 튜닝
+
+
+## Kubernetes 네트워킹/스토리지 기본: **Ingress Controller · CNI · CSI** 정리
+
+### 1) Ingress Controller란?
+
+#### 이론 및 개념
+
+* **Ingress Controller**는 Kubernetes 환경에서 **L7(HTTP/HTTPS)** 트래픽을 **클러스터 외부 → 내부 서비스**로 라우팅하는 컴포넌트입니다.
+* **Ingress 리소스**는 *경로/호스트/TLS 등 트래픽 규칙*을 **선언**하고, 실제 **분배/정책 적용은 Controller**가 수행합니다. (두 개념은 명확히 분리)
+
+#### Kubernetes Ingress ↔ Ingress Controller 관계
+
+| 구성요소                   | 역할                               |
+| ---------------------- | -------------------------------- |
+| **Ingress 리소스**        | 트래픽 흐름/분배 정책의 **선언적 정의** 제공      |
+| **Ingress Controller** | 정책 **해석** 후 실제 **라우팅/SSL 종료** 수행 |
+
+#### AKS의 주요 Ingress Controller 유형
+
+| 종류                                               | 특징                                                                            |
+| ------------------------------------------------ | ----------------------------------------------------------------------------- |
+| **애플리케이션 라우팅(Add-on)**                           | Azure 관리형 **NGINX** 기반, **Azure DNS 자동 등록/갱신**, **Key Vault** 인증서 연동, 손쉬운 활성화 |
+| **Application Gateway Ingress Controller(AGIC)** | **Azure Application Gateway** 연동, **WAF/SSO/SSL 종료**, 대규모 엔터프라이즈 기능           |
+| **기타(직접 설치/관리)**                                 | **Istio/Kong/Emissary/Traefik** 등 원하는 솔루션 직접 구성                               |
+
+#### 주요 옵션 (Ingress 스펙/어노테이션)
+
+| 옵션명                                                     | 값 예시                                          | 설명                  |
+| ------------------------------------------------------- | --------------------------------------------- | ------------------- |
+| `ingressClassName`                                      | `webapprouting.kubernetes.azure.com`, `nginx` | 여러 컨트롤러 동시 사용 시 구분자 |
+| `spec.rules[].host`                                     | `myapp.example.com`                           | 트래픽 도메인             |
+| `spec.rules[].http.paths[].path`                        | `/`, `/api`                                   | 요청 URI 경로           |
+| `spec.rules[].http.paths[].pathType`                    | `Prefix`, `Exact`                             | 경로 매칭 방법            |
+| `spec.rules[].http.paths[].backend.service.name`        | 서비스명                                          | 백엔드 서비스             |
+| `spec.rules[].http.paths[].backend.service.port.number` | 포트 번호                                         | 백엔드 포트              |
+| `spec.tls[].hosts[]`                                    | `[myapp.example.com]`                         | TLS 적용 호스트          |
+| `spec.tls[].secretName`                                 | `my-tls-secret`                               | TLS 인증서 Secret      |
+| `metadata.annotations["kubernetes.io/ingress.class"]`   | `nginx`                                       | (레거시) 컨트롤러 지정       |
+| `nginx.ingress.kubernetes.io/rewrite-target`            | `/`                                           | 경로 재작성              |
+| `nginx.ingress.kubernetes.io/ssl-redirect`              | `"true"`                                      | HTTP→HTTPS 리다이렉트    |
+| `nginx.ingress.kubernetes.io/backend-protocol`          | `HTTP/HTTPS/GRPC`                             | 백엔드 프로토콜            |
+
+#### Ingress 리소스 예시 (YAML)
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: example-ingress
+  annotations:
+    kubernetes.io/ingress.class: webapprouting.kubernetes.azure.com
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  ingressClassName: webapprouting.kubernetes.azure.com
+  tls:
+    - hosts:
+        - myapp.example.com
+      secretName: myapp-tls
+  rules:
+    - host: myapp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-service
+                port:
+                  number: 80
+```
+
+
+### Ingress Controller “최근 2가지” 방식 핵심 추가
+
+* **NGINX Ingress(Ingress API 기반)**
+
+  * 장점: 이식성 높음(온프렘/멀티클라우드), 유연한 라우팅·재작성·gRPC/WS, 비용 효율.
+  * 유의: WAF/mTLS 등 엔터프라이즈 보안은 **별도 솔루션 연동**이 일반적.
+* **Gateway API 기반 컨트롤러(예: Azure Application Gateway for Containers, NGINX Kubernetes Gateway)**
+
+  * 장점: `Gateway/GatewayClass/HTTPRoute`로 **역할 분리**(인프라팀=Gateway, 앱팀=Route), **WAF/mTLS/사설 L7** 등 클라우드 L7과 **네이티브 통합** 용이.
+  * 유의: 구현체별 세부기능 상이, 도입 시 **권한/ReferenceGrant** 등 개념 학습 필요.
+
+#### 선택 포인트(시험용 한 줄 정리)
+
+* **보안/거버넌스 중심** → *Gateway API*
+* **이식성/민첩성 중심** → *NGINX Ingress*
+
+
+---
+
+### 2) CNI(Container Networking Interface)란?
+
+#### 개념과 역할
+
+* **CNI**는 Pod 네트워크 인터페이스 구성, **IP 할당/라우팅/네트워크 정책**을 위한 **표준 플러그인 인터페이스**입니다.
+* Pod가 네트워크에 연결될 때 필요한 환경을 만들고 **올바르게 라우팅**되도록 보장합니다.
+
+#### AKS 네트워킹 모델 (개요)
+
+| 네트워킹 모델                         | 설명                               | 특징                                  |
+| ------------------------------- | -------------------------------- | ----------------------------------- |
+| **Azure CNI Overlay**           | Pod에 **논리 IP**를 터널링(VXLAN 등)로 할당 | IP 효율↑, 대규모 확장, 격리 용이               |
+| **Azure CNI Flat(Transparent)** | Pod가 **VNet 서브넷 실제 IP**를 직접 할당   | 온프렘 연동 용이, **IP 소모 큼**              |
+| **kubenet**                     | 노드만 실제 IP, Pod는 별도 논리망(NAT)      | 400노드 제한, **Windows 미지원**, 2028 EoS |
+
+#### 주요 CNI 옵션/파라미터
+
+| 옵션명                     | 예시값                                                       | 설명               |
+| ----------------------- | --------------------------------------------------------- | ---------------- |
+| `networkPlugin`         | `azure`, `kubenet`                                        | 네트워킹 플러그인        |
+| `networkPolicy`         | `calico`, `azure`, `none`                                 | Pod 간 네트워크 정책    |
+| `networkPluginMode`     | `overlay`, `transparent`                                  | CNI 동작 모드        |
+| `podCidr`               | `10.244.0.0/16`                                           | Overlay Pod CIDR |
+| `vnetSubnetId`          | `/subscriptions/.../subnets/mysubnet`                     | 실제 VNet 서브넷      |
+| `serviceCidr`           | `10.0.0.0/16`                                             | Service IP 풀     |
+| `dnsServiceIp`          | `10.0.0.10`                                               | CoreDNS IP       |
+| `outboundType`          | `loadBalancer`, `managedNATGateway`, `userDefinedRouting` | 아웃바운드 방식         |
+| `nsgId`/`routeTableId`  | 리소스 ID                                                    | NSG/UDR 연결       |
+| `privateClusterEnabled` | `true/false`                                              | 프라이빗 클러스터        |
+
+#### 동작 원리
+
+* **Overlay**: PodCidr 내 **논리 IP** → VXLAN 등 터널 → 노드/Pod 간 직접 통신, 외부는 **SNAT**. **대형/격리**에 유리.
+* **Flat(Transparent)**: Pod가 **VNet 실 IP** 직접 사용 → 외부 시스템 호환성↑, **IP 계획 중요**.
+* **kubenet**: 노드만 실 IP, Pod는 사설망 + **NAT**. 제한/미지원 사항 많아 **점진 종료 예정**.
+
+#### 비교 요약
+
+| 특성            | Azure CNI Overlay   | Azure CNI Flat | kubenet   |
+| ------------- | ------------------- | -------------- | --------- |
+| 최대 노드 수       | **5,000+**          | VNet IP 범위에 좌우 | \~400     |
+| Pod IP        | 논리 Overlay          | **VNet 실제 IP** | 사설망 + NAT |
+| Pod 간 통신      | 직접(터널)              | 직접             | NAT/경로 의존 |
+| IP 효율         | **높음**              | 중간             | 낮음        |
+| Windows 지원    | 예                   | 예              | 아니오       |
+| 정책            | Azure/Calico/Cilium | 유사             | 제한적       |
+| Virtual Nodes | 가능                  | 가능             | 미지원       |
+| 복잡도           | 중간                  | 낮음             | 높음        |
+
+#### 권장 사항/마이그레이션
+
+* 신규 AKS는 **Azure CNI Overlay** 권장.
+* **kubenet/IP 부족** 이슈는 **Overlay**로 전환 검토.
+* 온프렘/기존 VNet과 **긴밀 연동/보안 정책** 요구 시 **Flat** 고려.
+* 대규모/격리/모니터링 중시 시 **Overlay 최적**.
+
+### AKS Pod IP 구성 2모델(내부형) 비교 보강
+
+* **Azure CNI Overlay (Internal Overlay)**
+
+  * Pod는 **논리 IP(Overlay CIDR)**, 노드 간 **터널링**(VXLAN 등), 외부는 **노드 SNAT**.
+  * **IP 절약/대규모 확장**에 유리, 온프렘 경로설정 단순.
+  * 체크: `podCidr`, `networkPlugin=azure`, `networkPluginMode=overlay`.
+* **Azure CNI Flat/Transparent (서브넷 실IP 할당)**
+
+  * Pod가 **VNet 서브넷 실제 IP**를 직접 사용 → 온프렘/방화벽/소스IP 보존 시나리오에 유리.
+  * 단점: **IP 소모 큼** → 서브넷/쿼터/UDR/NSG 계획 필수.
+  * 체크: `networkPluginMode=transparent`, `vnetSubnetId` 대역 충분.
+
+#### 네트워킹 실수 방지 메모
+
+* **서브넷 IP 부족**이면 CA/VMSS 증설 실패(Flat).
+* **Outbound**: `managedNATGateway`(권장, egress 고정) 또는 LB/UDR.
+* **Network Policy**: Overlay/Flat 모두 Azure/Calico 사용 가능(구성 일관성 확인).
+
+---
+
+### 3) CSI(Container Storage Interface)란?
+
+#### 개념 및 목적
+
+* **CSI**는 쿠버네티스가 **외부 스토리지 백엔드(블록/파일/오브젝트)** 와 통신하기 위한 **표준 인터페이스**입니다.
+* in-tree 드라이버 한계를 탈피, **플러그인 방식**으로 독립적 개발/배포/업그레이드가 가능.
+
+#### 주요 기능
+
+* **동적 프로비저닝/해제**, **마운트/언마운트**, **볼륨 확장**, **스냅샷**, **다중 접근 모드(RWO/RWX)**
+
+#### 구조/동작 메커니즘
+
+| 구성 요소                 | 역할                                               |
+| --------------------- | ------------------------------------------------ |
+| **Controller Plugin** | PVC 생성 시 **실제 볼륨 생성/삭제/관리**                      |
+| **Node Plugin**       | 노드에 볼륨 **Attach/Detach**, Pod에 **Mount/Unmount** |
+| **Provisioner**       | PVC 이벤트 감시 → **PV 생성 요청**                        |
+| **Attacher**          | 워크로드 사용 시 **마운트 절차** 수행(다중 노드 연결 포함)             |
+
+#### AKS 주요 CSI 드라이버
+
+| 드라이버                | 설명/특징                      | 프로토콜/특성                         |
+| ------------------- | -------------------------- | ------------------------------- |
+| **Azure Disk CSI**  | 고성능 **블록** 스토리지, **RWO**   | Managed Disk (SSD/HDD)          |
+| **Azure Files CSI** | **SMB/NFS** 공유 파일, **RWX** | SMB 3.0 / NFS, Premium/Standard |
+| **Azure Blob CSI**  | **오브젝트**를 파일처럼 사용          | BlobFuse/NFS, 대용량 비정형           |
+
+#### (Azure Files CSI) 주요 파라미터
+
+| 옵션명                    | 값 예시                                       | 설명              |
+| ---------------------- | ------------------------------------------ | --------------- |
+| `provisioner`          | `file.csi.azure.com`                       | 프로비저너 식별자       |
+| `skuName`              | `Standard_LRS`/`Premium_LRS`/`Premium_ZRS` | 성능/내구성/SKU      |
+| `protocol`             | `smb`/`nfs`                                | 접근 프로토콜         |
+| `location`             | `koreacentral` 등                           | 리전 지정           |
+| `allowVolumeExpansion` | `true/false`                               | 동적 확장 허용        |
+| `reclaimPolicy`        | `Delete`/`Retain`                          | 삭제 시 동작         |
+| `mountOptions`         | `dir_mode=0777` 등                          | 마운트 옵션          |
+| `maxShares`            | `"10"`                                     | 동시 접근 한도(제약 있음) |
+
+#### StorageClass 예시 (Azure Files)
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azurefile-premium
+provisioner: file.csi.azure.com
+parameters:
+  skuName: Premium_LRS
+  protocol: smb
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+mountOptions:
+  - dir_mode=0777
+  - file_mode=0777
+```
+
+#### PVC 예시
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azurefiles-pvc
+spec:
+  storageClassName: azurefile-premium
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+```
+
+#### Azure Disk CSI 주요 사항
+
+* **블록 스토리지**, 고성능 DB/워크로드 적합, **RWO(ReadWriteOnce)**
+* **Premium/Standard SSD, Standard HDD** 지원, **스냅샷/볼륨 확장** 지원(무중단 크기 변경 가능)
+* **VM SKU별 디스크 수 한도/대역폭** 제약 주의
+
+#### 장애/운영 체크리스트
+
+* **PVC Pending**: StorageClass 파라미터/권한/PE 네트워크 확인
+* **마운트 실패**: K8s 이벤트/Pod 로그/Storage 상태/네트워크(Private Endpoint) 점검
+* **성능 이슈**: SKU 변경, **NFS/SMB 프로토콜** 교체, 대역폭 모니터링
+* **키 관리**: **Key Vault/Managed Identity** 연동
+* **보호**: 스냅샷/백업 정책 수립(복구 테스트 포함)
+
+
+### PV/PVC ↔ Azure Files 매핑(옵션·제약) + Private Endpoint 개념 정리
+
+* **왜 Azure Files인가?**
+
+  * **RWX(여러 노드 동시 읽기/쓰기)** 가 필요 → **Azure Files(CSI)** 사용.
+  * **Azure Disk(CSI)** 는 일반적으로 **RWO(단일 노드)**. *공유 디스크* 시나리오는 특수(제약 多) — **시험에선 RWX=Files, RWO=Disk**로 구분이 안전.
+* **주요 PVC 옵션과 Azure Files의 실제 의미**
+
+  * `accessModes`: **ReadWriteMany(RWX)** 지원(파일 공유).
+  * `resources.requests.storage`: 용량 지정(확장 `allowVolumeExpansion: true` 가능).
+  * `storageClassName`: `file.csi.azure.com`용 SC 선택(아래 예시).
+  * `reclaimPolicy`: **Delete/Retain**
+
+    * **Delete**: PVC 삭제 시 **파일 공유도 삭제**(주의).
+    * **Retain**: PVC 삭제해도 **데이터 보존**(사후 수동 정리/마이그레이션에 유용).
+  * `volumeBindingMode`: **WaitForFirstConsumer 권장**(스케줄 후 바인딩 → 영역·서브넷 제약 충돌 완화).
+  * `mountOptions`: `dir_mode/file_mode`, 캐시/권한 등 조정.
+  * `parameters`: `skuName(Premium/Standard)`, `protocol(smb/nfs)`, `location`, `maxShares` 등.
+
+#### StorageClass/PVC 예시(Azure Files, RWX, Retain)
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azurefile-premium-retain
+provisioner: file.csi.azure.com
+parameters:
+  skuName: Premium_LRS
+  protocol: nfs            # Linux RWX에 유리(권장), Windows는 smb 사용
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+mountOptions:
+  - vers=4.1               # NFS 예시
+  - rsize=1048576
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-share
+spec:
+  accessModes: [ ReadWriteMany ]
+  storageClassName: azurefile-premium-retain
+  resources:
+    requests:
+      storage: 200Gi
+```
+
+#### 인증/자격증명(시험 포인트)
+
+* **SMB**: 스토리지 계정 **액세스 키/SAS** 또는 **AD 기반(Kerberos)**.
+* **NFS**: IP 기반 접근 제어(사설망/PE로 제한), POSIX 권한.
+* **AKS에서 CSI** 는 보통 **Secret**(키/SAS) 또는 **Managed Identity + Key Vault** 조합으로 안전 관리.
+
+#### Private Endpoint vs Private Link(헷갈리기 쉬운 포인트)
+
+* **Private Link(개념 상위)**: PaaS를 **VNet 사설 IP**로 노출하는 **기술/제품군**.
+* **Private Endpoint(리소스)**: 스토리지 **서브리소스(file)** 등에 붙는 **사설 NIC**.
+
+  * Azure Files용 **PE 대상 서브리소스: `file`**
+  * **Private DNS Zone**: `privatelink.file.core.windows.net`(자동/수동 등록)
+  * 온프렘 접속 시 **ER/VPN + DNS 분기** 로 **PE 사설 IP** 해석되게 해야 함.
+  * **보안**: 스토리지 **방화벽 “선택 네트워크만”** + **PE** 조합, **공용 접근 차단**.
+
+#### 운영 체크(시험용 한 줄 요약)
+
+* **RWX 필요** → Azure Files(+PE)
+* **데이터 보존 필요** → `reclaimPolicy=Retain`
+* **폐쇄망** → **Private Endpoint + Private DNS + ER/VPN**
+* **Windows/SMB** vs **Linux/NFS** 프로토콜 선택 주의
+
+### 빠른 대비용 표(요지)
+
+| 항목     | Azure Disk(CSI) | Azure Files(CSI)       |
+| ------ | --------------- | ---------------------- |
+| 접근 모드  | **RWO**(일반)     | **RWX**(다중 노드)         |
+| 프로토콜   | 블록(파일시스템은 노드에서) | **SMB/NFS**            |
+| 사용처    | DB/저지연 단일 인스턴스  | 다중 Pod 공유(웹, 리포트, 업로드) |
+| 확장     | 크기 확장 OK        | 크기 확장 OK               |
+| 네트워크   | 노드 ↔ 디스크        | **PE로 폐쇄망 구성 용이**      |
+| 마이그레이션 | 스냅샷/복제          | 공유 복사/동시 접근 편리         |
+
+
+## GitHub Actions CI/CD 핵심 정리: 트리거·워크플로 위치·잡/스텝·시크릿 관리
+
+### 언제 실행되나? (Event Trigger)
+
+* **커밋/브랜치/태그**
+
+  * `push`: 브랜치/태그 푸시 시
+  * `pull_request`: PR 열림/수정/동기화 시 (기본적으로 *포크 PR*에는 시크릿 미노출)
+  * `release`: 릴리스 생성/게시
+* **수동/예약/외부**
+
+  * `workflow_dispatch`: **수동 실행** (UI/API, 입력 파라미터 가능)
+  * `schedule`: **크론(UTC)** 기반 예약 실행
+  * `repository_dispatch`: 외부 시스템이 **웹훅**으로 트리거
+  * `workflow_call`: **재사용 워크플로** 호출(모듈화)
+* **이슈/코드 스캔 등**
+
+  * `issue_comment`, `pull_request_review`, `code_scanning_alert` 등 상황별 세부 트리거
+
+> **필터링**: `branches`, `tags`, `paths`, `paths-ignore` 로 세밀 제어
+> **주의**: 포크에서 온 `pull_request`는 **시크릿 접근 불가**(보안). 필요 시 `pull_request_target`를 쓰되 **권한·체크아웃 대상**을 엄격히 제한.
+
+---
+
+### 액션/워크플로 파일은 어디에?
+
+* **워크플로(Workflow) 정의**: 레포지토리 **`.github/workflows/*.yml`**
+* **커스텀 액션(선택)**
+
+  * 레포 내 **`.github/actions/<name>/action.yml`** (Composite/JS/Docker 액션)
+  * 또는 **별도 레포**에서 버전 태그로 참조(`uses: org/repo@v1`)
+* **러너(Runner)**: GitHub-hosted(ubuntu/windows/macos) 또는 **Self-hosted** (네트워크 제약, 사설망 배포에 적합)
+
+---
+
+### 워크플로 기본 골격 (Jobs/Steps/권한/캐시/아티팩트)
+
+```yaml
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ "src/**", ".github/workflows/ci.yml" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read          # GITHUB_TOKEN 최소권한 원칙
+  id-token: write         # OIDC(클라우드 단기 토큰) 사용 시 필요
+
+concurrency:
+  group: ci-${{ github.ref }} # 동일 브랜치 중복 실행 방지
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ matrix.node }} }
+      - run: npm ci
+      - run: npm test
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: coverage/**
+
+  deploy:
+    needs: [ build-test ]
+    runs-on: ubuntu-latest
+    environment: prod          # 환경 보호 규칙(승인/시크릿 범위) 활용
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to Azure via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # 위 3개는 "페더레이션(Workload Identity)" 사전 구성이 전제
+      - run: az deployment group create -g rg -f main.bicep -p env=prod
+```
+
+* **Jobs**: 독립 실행 단위(병렬/의존관계 `needs`)
+* **Steps**: 잡 내부의 단계(`uses` 액션 호출 or `run` 셸 명령)
+* **`permissions`**: `GITHUB_TOKEN`의 최소 권한 설정(기본 “읽기 전용” 권장)
+* **`concurrency`**: 중복 실행 취소(배포 파이프라인 필수)
+* **캐시/아티팩트**: `actions/cache`, `upload-artifact`/`download-artifact`
+
+---
+
+### 시크릿(Secret)과 크리덴셜 관리 (ID/PW, 키, 토큰)
+
+* **종류와 우선순위**
+
+  * **Repository secrets**: 레포 전용 암호값
+  * **Environment secrets**: 특정 **environment**(dev/stage/prod) 전용 + **보호 규칙(승인/시간제한)**
+  * **Organization secrets**: 여러 레포에서 공유
+  * **Variables**: 민감정보가 아닌 일반 값(브랜치/경로 등)
+* **기본 토큰**
+
+  * **`GITHUB_TOKEN`**: 워크플로마다 발급되는 **단기 토큰**. 레포 접근/릴리스/PR 코멘트 등 자동화에 사용(권한은 `permissions`로 축소)
+* **클라우드 권한 부여 (강력 권장)**
+
+  * **OIDC + Federated Credentials** (예: Azure **Workload Identity**):
+    장기 **클라이언트 시크릿 없이**, 워크플로 런타임에 **단기 토큰** 발급 → **비밀 유출 위험↓**
+
+    * Azure: `azure/login@v2` + Entra ID **Federated Credential**(repo/브랜치 조건) 구성
+* **보안 수칙**
+
+  * 시크릿은 **로그에 출력 금지**(GitHub가 자동 마스킹하나, 문자열 조작하면 누설 가능)
+  * 포크 PR에 시크릿 **미제공**(기본). `pull_request_target` 사용 시 **체크아웃 대상 커밋**을 반드시 고정(신뢰된 기준 브랜치)
+  * 필요한 환경에만 **Environment secrets** 할당, **승인자** 설정
+  * 주기적 **로테이션**, 사용 이력/권한 **리뷰**
+  * 가능하면 **SAS/Access Key 대신 IAM(OIDC/MI)** 사용
+
+---
+
+### 파일 배치/명명/패턴 모음
+
+* **`.github/workflows/*.yml`**: 워크플로 정의(파일명 자유)
+* **`.github/actions/<name>/action.yml`**: 레포 내 커스텀 액션(Composite/JS/Docker)
+* **재사용 워크플로**: 별도 레포의 `.github/workflows/reusable.yml` → `workflow_call`로 가져와 공통화
+
+---
+
+### 트리거 필터링/PR 보안 예시
+
+```yaml
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "app/**"
+      - "!app/docs/**"     # 제외
+jobs:
+  pr-check:
+    if: ${{ github.event.pull_request.head.repo.fork == false }} # 포크 PR 제한
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm run lint
+```
+
+---
+
+### 실무 체크리스트(요약)
+
+* [ ] 트리거: `push/pull_request/workflow_dispatch/schedule` 등 **필요 최소로 명시**, `paths` 필터 적용
+* [ ] `permissions` 최소화, `concurrency`로 중복 배포 차단
+* [ ] 환경 분리: **`environment` + env secrets + 보호 규칙(승인)**
+* [ ] 시크릿: **OIDC(Workload Identity)** 로 **장기 키 제거**, 로테이션/권한 리뷰
+* [ ] 포크 PR: 시크릿 미노출, `pull_request_target` 시 **체크아웃 커밋 고정**
+* [ ] 캐시/아티팩트 적극 활용, 재사용 워크플로로 **중복 제거**
+
+## Azure 로드 밸런싱 선택 가이드 — **제품/가용성(조널·리저널·글로벌) 관점**
+
+### 한눈에 보기(무엇을 언제 쓰나)
+
+| 계층/범위            | 조널(Zonal)                                         | 리저널(Region)                                                      | 글로벌(Global)                                         | 주요 용도                                   |
+| ---------------- | ------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------- |
+| **L4 (TCP/UDP)** | **Azure Load Balancer Standard** (프런트엔드/백엔드 존 지정) | **Azure Load Balancer Standard** (Zone-redundant, Cross-zone LB) | **Cross-region Load Balancer**                      | 비HTTP 트래픽, 게임/IoT/TCP/UDP, 내부 서비스 L4 분산 |
+| **L7 (HTTP/S)**  | (존 배치 기반)                                         | **Application Gateway v2**(WAF/Autoscale/Zone-redundant)         | **Azure Front Door**(Std/Premium, Anycast, WAF, 캐시) | 웹/REST, 경로/호스트 기반 라우팅, WAF              |
+| **DNS 기반**       | -                                                 | -                                                                | **Traffic Manager**                                 | 프로토콜 무관 글로벌 엔드포인트 선택(DNS 레벨)            |
+| **서비스 체인**       | -                                                 | **Gateway Load Balancer**                                        | -                                                   | NVA(방화벽/IDS) 인라인 삽입                     |
+| **아웃바운드**        | -                                                 | **NAT Gateway**                                                  | -                                                   | 고정 egress IP/포트 스케일(로드밸런서 아님)           |
+
+> 포인트: “내부/공개”보다 **제품/가용성 범위**로 먼저 고릅니다. L7 글로벌=**Front Door**, L7 리저널/WAF=**Application Gateway**, L4=**Load Balancer**, DNS 레벨 스티어링=**Traffic Manager**.
+
+---
+
+### Azure Load Balancer (L4) — 조널·리저널·글로벌
+
+#### 핵심
+
+* **계층**: L4(TCP/UDP). 백엔드=NIC/VM/VMSS.
+* **가용성**:
+
+  * **Zonal**: 프런트엔드를 특정 Zone에 고정 가능.
+  * **Zone-redundant**: 다중 Zone에 걸쳐 프런트엔드/데이터평면 분산.
+  * **Cross-region**: 여러 **리저널 LB**를 백엔드로 두는 **글로벌 L4**.
+* **해alth Probe**: TCP(핸드셰이크만) / HTTP(S) 200응답 확인(웹이면 **HTTP Probe 권장**).
+* **세션**: 5-tuple 해시, **Session persistence**(None/ClientIP/ClientIP+Protocol).
+* **HA Ports**: 모든 포트 로드밸런싱(방화벽/게이트웨이 앞단에 유용).
+* **아웃바운드**: SNAT 포트 한계 존재 → **NAT Gateway**로 분리 설계 권장.
+
+#### 자주 하는 실수
+
+* 웹인데 **TCP Probe** 사용 → 앱이 응답 불가여도 포트만 열려 있으면 “정상”으로 판단.
+* **AzureHealthProbe 서비스 태그** 미허용(NSG) → 프로브 실패로 백엔드 제외.
+* egress를 LB Outbound Rule로만 구성 → **SNAT 고갈**로 실패.
+
+---
+
+### Application Gateway v2 (L7, 리저널)
+
+#### 핵심
+
+* **HTTP/S** 전용 L7, **경로/호스트 기반**, 리라이트/리디렉션, **WAF(OWASP)**, **Autoscale**, **Zone-redundant**.
+* **엔드투엔드 TLS**(프런트 종료 + 백엔드 재암호화), **mTLS**, 쿠키 기반 세션 어피니티.
+* **AKS 연동**: **AGIC**로 Ingress 규칙 → AppGW 설정 반영(리저널 L7).
+
+#### 언제 쓰나
+
+* 리전 내 **엔터프라이즈 웹/WAF** 요구, 내부(Private) 또는 외부(Public) L7, 세밀한 라우팅/정책.
+
+---
+
+### Azure Front Door (L7, 글로벌)
+
+#### 핵심
+
+* **글로벌 Anycast 엣지**에서 TLS 종료, **헬스 프로브 + 원본그룹**으로 **지역 간 활성/활성**.
+* **WAF**, 캐싱(Std/Premium), **세션 어피니티(쿠키)**, \*\*프라이빗 링크 오리진(프리미엄)\*\*로 사설 원본 보호.
+
+#### 언제 쓰나
+
+* **전 세계 사용자** 대상, 최단 엣지 접속/페일오버, 글로벌 L7 라우팅/가속.
+
+---
+
+### Traffic Manager (DNS, 글로벌)
+
+#### 핵심
+
+* **DNS 레벨** 트래픽 스티어링(프로토콜 무관). **Priority/Weighted/Performance/Geo/Subnet** 프로파일.
+* DNS **TTL**에 따라 장애전파 지연. 클라이언트/리졸버 캐시 영향.
+
+#### 언제 쓰나
+
+* L4/L7 제품과 **조합**하여 **글로벌 엔드포인트 선택**이 필요할 때 (예: TM → AppGW/Front Door).
+
+---
+
+### Gateway Load Balancer (서비스 체인, 리저널)
+
+#### 핵심
+
+* **Geneve** 캡슐화로 **NVA 인라인 삽입**. 기존 L4/L7 앞뒤에 “투명” 부착.
+* 대형 방화벽/IDS/IPS를 **스케일아웃**으로 배치.
+
+---
+
+### NAT Gateway (Egress 전용, 리저널)
+
+#### 핵심
+
+* **아웃바운드 전용**. **고정 퍼블릭 IP/대량 SNAT 포트** 제공.
+* 내부 서비스에서 외부 API 호출 시 **고정 소스 IP** 보장(화이트리스트 대응).
+
+---
+
+### 가용성 설계 패턴
+
+* **존 내 고가용성**: AppGW **Zone-redundant**, LB **Zone-redundant**/Cross-zone.
+* **리전 DR**: 리전별 **AppGW/LB** + **Front Door(글로벌)** 로 활성/활성, 또는 **Traffic Manager Priority**로 활성/대기.
+* **보안 체인**: **Gateway LB** + NVA + **AppGW/LB**(HA Ports) 조합.
+
+---
+
+### 선택 레시피(요구조건 → 제품)
+
+* **비HTTP L4, 내부 서비스** → **Azure Load Balancer(Standard)**
+* **리전 L7/WAF, Private 또는 Public** → **Application Gateway v2**
+* **글로벌 L7, 엣지 가속/페일오버** → **Azure Front Door**
+* **프로토콜 무관 글로벌 라우팅(DNS)** → **Traffic Manager**
+* **NVA 인라인** → **Gateway Load Balancer**
+* **고정 egress IP/대량 동시접속** → **NAT Gateway**
+
+---
+
+### 운영 체크리스트
+
+* **Probe 경로/포트**: 웹은 **HTTP(S) 200** 확인, NSG에 **AzureLoadBalancer/AzureHealthProbe** 허용.
+* **세션 전략**: 상태 저장 앱은 **어피니티**(AppGW/Front Door) 또는 **외부 세션 스토어**.
+* **SNAT**: 대량 아웃바운드는 **NAT GW** 우선.
+* **DNS**: Front Door/TM 도입 시 **TTL/캐싱/헬스 프로브** 동작 이해.
+* **코스트**: 데이터 전송/규칙/처리 단가(Front Door, AppGW)와 **스케일**에 따른 비용 확인.
+
+
+
+## VMware → Azure 마이그레이션(Agentless 중심) — OS 제약·요건·프로세스 한눈에 정리
+
+### 1) 마이그레이션 방식 요약 (Agentless vs Agent-based)
+
+| 구분    | Agentless (권장)                                      | Agent-based                      |
+| ----- | --------------------------------------------------- | -------------------------------- |
+| 방식    | vCenter/ESXi 스냅샷을 **마이그레이션 어플라이언스**가 읽어 Azure로 복제   | 각 VM에 **Mobility Agent** 설치 후 복제 |
+| 장점    | 에이전트 설치 불필요, 빠른 착수, 일괄 이행에 유리                       | 광범위 OS 지원, 특수 게스트/파일시스템 지원 폭 넓음  |
+| 제한    | 특정 디스크/부팅/암호화 조합 미지원(아래 표)                          | 게스트 내 에이전트 설치/유지보수 필요            |
+| 동시 복제 | vCenter당 **최대 300**(단일 어플라이언스), **최대 500**(스케일아웃 시) | 시나리오/인프라에 의존                     |
+
+> Microsoft는 VMware→Azure에 대해 **Agentless를 우선 권장**합니다. 단, 제약에 걸리면 Agent-based를 사용하세요. 
+
+---
+
+### 2) vSphere·네트워크 선행 요건(Agentless)
+
+* **vCenter/ESXi**: vCenter **6.5/6.7/7.0/8.0**, ESXi **6.5/6.7/7.0/8.0** 지원.
+* **어플라이언스 배치**: vCenter에 **Azure Migrate Appliance(OVA/스크립트)** 배포 후 등록. 대규모 이행은 **스케일아웃 어플라이언스** 사용. 
+* **필수 포트**
+
+  * vCenter **TCP 443 (인바운드)**: 스냅샷 생성/삭제 등 오케스트레이션.
+  * ESXi **TCP 902 (인바운드/아웃바운드)**: 스냅샷에서 데이터 복제/하트비트.
+  * 어플라이언스 → Azure **TCP 443 (아웃바운드)**: 복제 데이터 업로드/제어.
+
+---
+
+### 3) **OS 지원/제약(Agentless)** — “어디까지 그대로 올릴 수 있나”
+
+#### Windows / Linux 지원선
+
+* **Windows**: *문서상* **Windows Server 2003 이상** 지원 **(단, EOS OS는 결과 보장 불가·업그레이드 권장)**.
+* **Linux**: Azure가 지원하는 배포판 전반을 커버. RHEL/Ubuntu/SLES/Debian/Oracle/Alma/Rocky 등 주요 배포판은 **자동 수정(waagent 설치 등) 범위** 제공. 일부 커널/설정은 수동 조치 필요.
+
+> **EOL OS 경고**: Windows Server 2003/2008/2012(R2 포함)는 **지원 종료(EOS)** 로 **일관된 결과를 보장하지 않음** → **사전 업그레이드 권장**. 
+
+#### 부팅/디스크·파일시스템 제약(핵심만 발췌)
+
+* **UEFI → Azure Gen2** 로 변환되며, **Secure Boot는 Agentless 경로에서 미지원** → 마이그레이션 후 **Trusted Launch**로 재활성 권장. 
+* **동적 디스크(Windows OS 디스크)**: **미지원** → **Basic** 으로 전환 후 진행. 
+* **암호화 디스크/볼륨(BitLocker 등)**: **미지원** → 암호화 해제 후 마이그레이션.
+* **RDM/Independent/NVMe/iSCSI 타깃/Multipath IO**: **미지원** (복제 제외).
+* **NFS/ ReiserFS** 마운트: **복제 대상 아님**.
+* **NIC Teaming/IPv6**: **미지원**.
+* **디스크 크기 한도**: OS 디스크 Gen1 **≤2TB**, Gen2 **≤4TB** / 데이터 디스크 **≤32TB**.
+* **부트 파티션 규칙**: `/boot`(Linux) 또는 **EFI/System Reserved**는 **OS 디스크 내**에 존재해야 함(다른 디스크로 분산 금지). 
+
+---
+
+### 4) 게스트 OS 준비 팁(Agentless 공통)
+
+* **Windows**
+
+  * **RDP 활성화**, 방화벽에 **TCP/UDP 3389 허용**, **SAN 정책=OnlineAll** 확인.
+* **Linux**
+
+  * **SSH 활성화**, 방화벽 포트 허용.
+  * `waagent` 설치에 필요한 **Python/OpenSSL/OpenSSH, sfdisk/fdisk/parted** 등 패키지 확인.
+  * **SELinux Enforced**는 자동 설정/에이전트 설치 실패 가능 → **Permissive 권장**.
+
+---
+
+### 5) Agent-based를 고려해야 하는 경우
+
+* 위 **Agentless 제약**(동적/암호화/RDM/특수 파일시스템/네트워킹) 중 **하나라도 충족 불가**.
+* OS/커널 조합이 **Site Recovery**(현대화 경험) 쪽에서 더 폭넓게 보장될 때. **(OS·커널 매트릭스는 ASR 기준과 동일)**
+
+---
+
+### 6) 표준 이행 프로세스(Agentless 관점)
+
+1. **어세스먼트**: Azure Migrate Discovery & Assessment로 사이징/종속성 파악.
+2. **어플라이언스 배포**: vCenter에 **Azure Migrate Appliance**(OVA/스크립트) 설치·등록, VDDK 준비. 
+3. **복제 구성**: 대상 VM 선택, 저장소/네트워크/VM 크기 매핑, **동시 복제 수** 고려. 
+4. **Test Migration**: 격리된 네트워크에 가동·기능/성능 검증.
+5. **컷오버(Migrate)**: 변경동기화 → 전환(다운타임 극소화) → DNS/보안 정책 적용.
+6. **후속 작업**: **Azure VM Agent/Diagnostics**, 백업/모니터링/보안 기준(Defender) 정착.
+
+---
+
+### 7) 운영·트러블슈팅 체크리스트
+
+* **포트/프록시/SSL 검사**: 어플라이언스→Azure 443, vCenter/ESXi 443/902 허용.
+* **스냅샷 실패**: vCenter 권한(디스크 임대/스냅샷) 누락 여부, 데이터스토어 여유공간 확인.
+* **복제율 저하**: 어플라이언스 리소스, WAN 대역폭, 스케일아웃 도입 검토.
+* **부팅 실패**: Secure Boot 사용 VM, 동적 디스크, 부트 파티션 분산 여부 확인(상단 제약 참고). 
+
+---
+
+### 8) 시험에 자주 묻는 포인트(요약)
+
+* **vSphere/포트 요건**(443/902), **어플라이언스 개념**, **Agentless 제약(동적/암호화/RDM/UEFI-SecureBoot 등)**, **UEFI→Gen2 변환**. 
+* **동시 복제 상한/스케일아웃** 수치 기억. 
+* **EOL OS 경고**: 결과 보장 X → 업그레이드 권장. 
+
+---
+
+### 예상문제 3개 (정답 포함)
+
+1. **객관식**
+   Agentless VMware→Azure 마이그레이션의 **네트워크 요구사항**으로 옳지 않은 것은?
+   A. 어플라이언스→Azure로 **TCP 443** 아웃바운드 필요
+   B. vCenter로 **TCP 443 인바운드** 필요
+   C. ESXi와 **TCP 902** 통신 필요
+   D. **IPv6 전용** 환경에서도 복제가 완전 지원됨
+   **정답:** D (Agentless는 **IPv6 미지원**). 
+
+2. **단답형**
+   Agentless 경로에서 **보안 부팅(Secure Boot)** 을 사용하던 UEFI VM을 이관할 때 권장 대응은?
+   **모범답안:** **Gen2**로 마이그레이션 후 **Trusted Launch VM** 으로 전환해 Secure Boot 등 보안 기능을 재활성화. 
+
+3. **서술형**
+   동적 디스크(OS)·BitLocker·RDM 디스크가 혼재한 VM을 Azure로 옮겨야 한다. **방식 선택**과 **사전 조치**를 서술하라.
+   **모범답안 요지:**
+
+* Agentless는 **동적/암호화/RDM 미지원**이므로 **Agent-based(Mobility)** 고려. 또는 사전 조치로 **동적→Basic 변환**, **암호화 해제**, **RDM 제거/데이터 재배치** 후 Agentless 진행.
+
+---
+
+### 참고 문서
+
+* VMware vSphere 마이그레이션 지원 매트릭스(Agentless/Agent-based, 제약/포트/동시복제 등)
+* 어플라이언스 요건(VDDK/배포 옵션) & 스케일아웃
+* Site Recovery(Agent-based) OS·커널 상세 매트릭스(현대화 경험) 
+
+> 필요하면, 환경(버전/디스크/보안) 스냅샷을 알려주면 **Agentless/Agent-based 선택안**과 **사전 수정 체크리스트**를 바로 깔끔하게 뽑아줄게요.
