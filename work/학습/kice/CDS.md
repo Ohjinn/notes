@@ -3288,3 +3288,245 @@ spec:
 - C. `maxSurge`를 0으로 한다  
 - D. `terminationGracePeriodSeconds`를 5로 줄인다  
 **정답:** B
+
+
+## Azure Service Bus — 치트시트 (GFM)
+
+### 핵심 개념 맵
+	•	Queue: 1:1(점대점) 비동기 큐. 소비자 수를 늘려 경합(Competing Consumers) 패턴으로 처리량 확장.
+	•	Topic / Subscription: 1:다 퍼블리시-서브스크라이브. Subscription마다 필터(SQL/Correlation) 로 메시지 선택·분기.
+	•	Delivery 모드:
+	•	Peek-Lock(권장): 메시지를 잠그고 처리 후 Complete()로 확정. 실패 시 Abandon/Dead-letter.
+	•	Receive-and-Delete: 수신 즉시 삭제(손실 위험).
+	•	Exactly-once에 가까운 처리: 본질은 at-least-once. 중복감지(Duplicate Detection) + 트랜잭션 + 멱등성으로 실무 달성.
+	•	Session(FIFO/그룹화): SessionId 동일 메시지는 순서 보장 + 단일 소비자로 처리. 상태(Session State) 저장 가능.
+	•	Dead-letter Queue(DLQ): MaxDeliveryCount 초과/필터 불일치/TTL 만료 등 격리 보관. DLQ는 각 큐/서브스크립션에 종속.
+	•	고급 기능: 스케줄링(예약 발송), Deferral(처리 지연/보류), 메시지 Defer/Defered retrieval, 지연 재시도.
+
+### SKU·성능·네트워킹 요약
+	•	Standard: 대부분 기능(토픽/세션/중복감지/스케줄링/트랜잭션) 제공, 공유 인프라.
+	•	Premium: 전용 리소스 격리(Messaging Unit), 예측 가능 성능·지연, 가용성 옵션 강화(예: 존 배치), 대규모 연결·고부하에 적합.
+	•	네트워킹: Private Endpoint/Private Link로 사설화, Firewall 규칙/IP 필터로 공용 접근 제어.
+	•	지역 복구: Geo-DR(alias) 로 네임스페이스 페어링/페일오버(메타데이터 수준). 데이터 복제는 애플리케이션 설계(양방향 복제/재발행) 가 필요.
+
+### 핵심 운영 파라미터
+	•	LockDuration: 5~300초. 긴 처리라면 자동 잠금 갱신(Auto-renew) 사용.
+	•	Message TTL: 만료 시 DLQ 이동(옵션에 따라).
+	•	MaxDeliveryCount: 재시도 횟수. 초과 시 DLQ.
+	•	DuplicateDetectionHistoryTimeWindow: 중복감지 기억 창(예: 10분). MessageId 가 반드시 고유해야 작동.
+	•	PrefetchCount: 성능 향상(왕복 감소). 단, 과도 프리페치 + 긴 처리는 잠금 만료 위험.
+
+### 필터링(토픽/서브스크립션)
+	•	CorrelationFilter: CorrelationId, MessageId, Subject(Label), 사용자 속성 등 정확 일치.
+	•	SQLFilter: 사용자 속성에 대한 SQL 표현식(예: priority > 5 AND region = 'KR').
+	•	Rule Action: 메시지에 헤더/속성 추가·변경.
+
+### 트랜잭션·중복·순서 보장
+	•	중복감지: 네임스페이스/엔터티에서 활성화 + MessageId 지정 ⇒ 창 내 중복 투입 자동 폐기.
+	•	트랜잭션: 동일 네임스페이스 내 다중 작업(완료+보내기 등) 을 한 단위로 커밋/롤백.
+	•	순서(FIFO): SessionId 기반으로 세션 처리기를 사용(세션 단일 소비자). 순서+중복을 함께 요구하면 세션 + 중복감지 병행.
+
+### 재시도·에러 처리 패턴
+	•	지수 백오프(Jitter 포함)로 일시 오류 흡수.
+	•	DLQ 운영: 원인 태그(사유/컬렉션) 기록 → KQL/워크플로우로 triage → 필요 시 재게시(리드라이브).
+	•	Poison 메시지: 재현·패치 후 수동/자동 리드라이브.
+	•	Idempotency: 업무 키를 MessageId로 매핑, 처리 로그/아웃박스로 중복 커밋 방지.
+
+### 운영·스루풋 팁
+	•	Processor 기반 소비자(Auto-complete 끄고 수동 Complete()): 예측 가능한 처리.
+	•	MaxConcurrentCalls / MaxConcurrentSessions: 워커 동시성 제어(세션 사용 시 세션 단위).
+	•	큰 메시지: 256KB(Std)/1MB(Prem) 근방이면 청크/Blob 오프로드 고려.
+	•	메트릭 관찰: Incoming/Outgoing Messages, Active/Dead-lettered, Server Errors, Throttled Requests, Connections, CPU/MU(Premium).
+
+### 코드 스니펫(예: .NET, 세션 + 중복감지 + 수동 완료)
+
+```javascript
+var client = new ServiceBusClient(connStr);
+var processor = client.CreateSessionProcessor(
+    "orders", new ServiceBusSessionProcessorOptions {
+        AutoCompleteMessages = false,
+        MaxConcurrentSessions = 8,
+        MaxConcurrentCallsPerSession = 1,   // 세션 내 순서 보장
+        PrefetchCount = 100
+    });
+
+processor.ProcessMessageAsync += async args => {
+    try {
+        // 멱등성: MessageId 로 중복 처리 방지 (예: Redis/DB 체크)
+        var msg = args.Message;
+        // 비즈니스 처리 ...
+        await args.CompleteMessageAsync(msg);   // 성공 시 확정
+    } catch (TransientException) {
+        await args.AbandonMessageAsync(args.Message); // 재시도 대상
+    } catch (Exception ex) {
+        await args.DeadLetterMessageAsync(args.Message, "ProcessingFailed", ex.Message);
+    }
+};
+processor.ProcessErrorAsync += err => {
+    Console.WriteLine(err.Exception);
+    return Task.CompletedTask;
+};
+await processor.StartProcessingAsync();
+```
+
+### 자주 나오는 함정
+	•	레디스/DB와의 분산 트랜잭션 기대 ❌ → 동일 네임스페이스 내 버스 작업만 트랜잭션. 외부 저장소는 Outbox/InBox 패턴.
+	•	중복감지 ON인데 MessageId 미설정 → 효과 없음.
+	•	세션 사용 중 동시성 2↑ → 순서 깨짐.
+	•	프리페치↑ + 처리 지연 → 락 만료로 이중 소비. 자동 Lock 갱신 또는 프리페치 튜닝.
+	•	Geo-DR이 데이터 동기화로 오해 → 메타데이터 페일오버일 뿐, 메시지 복제 아님.
+
+### 선택 가이드(비교)
+	•	Service Bus vs Storage Queue
+	•	Service Bus: 세션/FIFO, 트랜잭션, 중복감지, 필터링, 스케줄링 필요할 때.
+	•	Storage Queue: 초저가·단순 대량 쌓기/폴링, 기능 요구가 낮을 때.
+	•	Service Bus vs Event Hubs
+	•	Service Bus: 명령/워크플로우, 업무 트랜잭션.
+	•	Event Hubs: 텔레메트리/스트리밍(초당 수십만 이벤트, 소비자별 오프셋).
+
+### 체크리스트
+	•	큐/토픽에 중복감지(윈도)와 TTL/MaxDelivery/DLQ 정책 명시
+	•	세션/순서 필요 여부 판단 → SessionProcessor 채택
+	•	지수 백오프 + DLQ 운영 설계(리드라이브 절차 포함)
+	•	Private Endpoint/Firewall로 네트워크 경계 확정
+	•	멀티 엔티티 트랜잭션(가능 범위)과 멱등 처리 결합
+	•	대형 페이로드는 외부 저장소 + 포인터 패턴
+
+예상문제 3개
+	1.	객관식
+주문ID별로 순서 보장과 단일 소비자 처리가 필요하다. 가장 적절한 구성은?
+
+	•	A. 토픽 + SQL 필터
+	•	B. 큐(또는 토픽 서브스크립션) + SessionId=주문ID + Session Processor
+	•	C. 큐 + Prefetch=0
+	•	D. 토픽 + 여러 구독
+정답: B
+
+	2.	단답형
+중복감지를 활용하려면 엔티티 설정 외에 메시지에 어떤 필드를 반드시 지정해야 하는가?
+정답: MessageId(업무 키로 고유 값 설정).
+	3.	서술형
+Service Bus로 at-least-once 환경에서 멱등 처리와 DLQ 운영을 결합해 “사실상 정확히 한 번”을 달성하는 방법을 설명하라.
+모범요지: MessageId를 업무 키로 고정 + 중복감지 윈도 활성화, 소비자는 Outbox/InBox/처리로그로 멱등성 확보, 지수 백오프 재시도 적용. MaxDeliveryCount 초과 시 DLQ로 격리해 원인 분석 후 리드라이브(재게시). 세션/FIFO가 필요하면 SessionId 병행. 네트워크는 Private Endpoint로 사설화.
+
+
+## Azure Front Door Premium — 글로벌 엣지 + 사설 오리진(Private Link) + WAF 치트시트 (GFM)
+
+### TL;DR
+	•	문제: 인터넷에 노출하지 않고(Private) 전 세계로 빠르게 배포 + L7 보안 필요
+	•	해결: AFD Premium + Origin Private Link + WAF Policy
+	•	핵심: 엣지(Front Door)만 Public, 오리진은 VNet 내부 IP(Private Endpoint) 로 잠그고, AFD가 승인된 Private Link 로만 진입
+
+⸻
+
+### 구성요소 한눈에
+	•	Front Door(Std/Prem): 글로벌 L7 리버스 프록시/엣지, 라우팅·압축·캐시·장애극복(오리진 그룹)
+	•	WAF Policy: OWASP 규칙 + 사용자 정의(Geo, IP, Rate Limit 등), 라우트별/도메인별 연동
+	•	Origin Group: 백엔드 풀(Region 다중화), 헬스 프로브/부하분산 정책
+	•	Origin Private Link(Prem): AFD ↔ 오리진 사설 연결(오리진 Public 차단)
+	•	도메인/인증서: 커스텀 도메인(CNAME/ALIAS) + Managed/Bring-your-own TLS
+	•	Rules Engine: 리다이렉트/리라이트/헤더 삽입/캐시 제어/경로 기반 라우팅
+
+⸻
+
+### 표 — 언제 Premium + Private Link?
+
+요구	선택
+오리진 Public 완전 차단	Premium + Origin Private Link
+단순 전역 배포(오리진 Public 허용)	Standard/Premium(PL 불필요)
+L7 보안(WAF, Rate Limit)	Standard/Premium + WAF
+멀티-Region 액티브/액티브	Origin Group + 프로빙/우선순위
+정적 캐시 가속	Rules Engine + 캐시 정책
+
+
+⸻
+
+### 아키텍처(사설 오리진: Private Link)
+	1.	오리진(웹앱/VM/AppGW/Storage) 를 VNet Private Endpoint 로 구성(공용 접근 차단).
+	2.	AFD Premium 생성 → Origin Group 추가 → Origin에 “Private Link” 사용 체크.
+	3.	오리진 리소스에서 “AFD Private Link 연결 승인”(Pending 승인 흐름).
+	4.	WAF Policy 작성(관리형 규칙 + Geo/IP/Rate 제한) → Front Door에 연결(Association).
+	5.	Routes: example.com → /api/*는 App1, /static/*은 Storage 등 경로/도메인 기반 분기.
+	6.	DNS: www.example.com을 Front Door 엔드포인트로 CNAME/ALIAS, AFD에서 TLS 인증서 바인딩.
+
+방화벽/NSG: 오리진 네트워크는 해당 Private Endpoint NIC(및 AFD가 설정한 링크)만 허용. 불필요한 Public Inbound 전면 차단.
+
+⸻
+
+### 헬스 프로브/부하분산 베스트 프랙티스
+	•	프로브 경로 전용(/healthz) + 200 OK 명확화
+	•	오리진별 호스트 헤더 일치(가상호스팅)
+	•	우선순위+가중치로 액티브/스탠바이 또는 액티브/액티브
+	•	세션 부하편중 필요 시: Session Affinity(cookie) 사용(필요할 때만)
+
+⸻
+
+### Rules Engine(자주 쓰는 규칙)
+	•	HTTP→HTTPS 리다이렉트
+	•	경로 기반 라우팅/리라이트: /app/* → /index.html SPA
+	•	캐시 Key 튜닝: 헤더/쿼리 선택 포함/제외
+	•	보안 헤더 추가: HSTS, X-Content-Type-Options, CSP 등
+
+IF: Request scheme == HTTP
+THEN: Redirect to HTTPS (301)
+
+IF: Path begins_with "/static/"
+THEN: Route to Storage-origin, Cache-control: public, max-age=86400
+
+
+⸻
+
+보안(Zero Trust) 체크리스트
+	•	오리진 Public 비활성 + Private Endpoint 강제
+	•	AFD Premium Origin Private Link로만 진입(연결 승인 필수)
+	•	WAF Policy(관리형 + 사용자 규칙/Rate Limit)
+	•	TLS 최신 정책, HSTS 적용
+	•	도메인 소유 검증 + Managed cert 자동 갱신
+	•	로그/메트릭(Access, WAF, 프록시 로그) → Log Analytics/SIEM
+
+⸻
+
+운영 팁
+	•	전환 절차: 새 AFD 라우트 준비 → 저 TTL로 DNS 스위치 → 모니터링 후 TTL 복구
+	•	오리진 장애 시 응답: 커스텀 에러 페이지/Failover 정책 세팅
+	•	비용: 요청 수, 아웃바운드, 룰 평가, WAF 평가에 비례 → 캐시/압축/경로 분리로 최적화
+	•	관측: 상태 코드 분포, WAF 매칭, 오리진 응답시간/실패율, 캐시 적중률
+
+⸻
+
+자주 나오는 함정
+	•	Private Link 승인 누락 → 오리진 Unreachable
+	•	오리진 Host 헤더 불일치 → 4xx/5xx
+	•	WAF 정책 연결 위치(전역 vs 라우트별) 혼동 → 의도치 않은 차단/통과
+	•	캐시 키에 불필요한 쿼리/헤더 포함 → 캐시 적중률 급락
+	•	DNS Apex 루트를 CNAME 못함 → ALIAS/ANAME 또는 프록시 DNS 기능 사용
+
+⸻
+
+미니 절차(체크리스트)
+	1.	오리진 Private Endpoint 만들고 Public 접근 Off
+	2.	AFD Premium → Origin Group → Origin(Private Link) 추가
+	3.	오리진 리소스에서 Private Link “승인”
+	4.	WAF Policy 작성/연결, Rules Engine 구성
+	5.	커스텀 도메인 + TLS 바인딩
+	6.	헬스 프로브/우선순위/가중치 튜닝
+	7.	로그/경보 배선 후 릴리즈
+
+⸻
+
+예상문제 3개
+	1.	객관식
+오리진을 인터넷에 노출하지 않고 전 세계에 서비스하려면 가장 적절한 조합은?
+
+	•	A. Standard Front Door + Service Endpoint
+	•	B. Premium Front Door + Origin Private Link + WAF Policy
+	•	C. Application Gateway + Public IP
+	•	D. CDN(3rd party) + NSG
+정답: B
+
+	2.	단답형
+AFD Premium에서 Private한 오리진으로만 트래픽을 유도하려면 오리진에 무엇을 활성화하고 어떤 절차가 필요한가?
+정답: Origin Private Link 활성화 후, 오리진 리소스 측 Private Link 연결 “승인”.
+	3.	서술형
+/static/* 정적 파일은 캐시로, /api/* 는 동적 백엔드(사설 오리진)로 라우팅하면서 L7 보안을 적용하라.
+모범요지: AFD Premium 구성 → Origin Group(Static=Storage, API=App) + API 오리진은 Private Link. Routes로 경로 분기, Rules Engine으로 /static/* 캐시/압축, /→https 리다이렉트. WAF Policy(관리형 규칙 + Rate Limit) 연결. 커스텀 도메인/TLS, 헬스 프로브와 우선순위 설정, 로그/경보 배선.
