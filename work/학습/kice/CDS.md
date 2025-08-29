@@ -2423,3 +2423,1110 @@ resource "azurerm_subnet_nat_gateway_association" "subnet_nat" {
 * [ ] `network_policy`(azure/calico)와 `outbound_type`(managedNATGateway 등) 위치를 기억하는가?
 * [ ] 노드 서브넷은 **`default_node_pool.vnet_subnet_id`** 에서 지정한다는 점?
 * [ ] NAT Gateway 연동은 **서브넷 연결 + AKS outbound\_type**을 함께 본다?
+
+## Istio Service Mesh — Virtual Host와 핵심 리소스 치트시트
+
+### 한눈에 개념 맵
+	•	Gateway: 엣지(ingress/egress) 리스너(포트/프로토콜/TLS/SNI) 정의
+	•	VirtualService: 가상 호스트(hosts) + 라우팅 규칙(경로/헤더/쿠키 매칭 → 목적지)
+	•	DestinationRule: 백엔드 서브셋(subset=버전 라벨) 및 연결 정책(LB/재시도/회로차단/TLS)
+	•	ServiceEntry: 메시 외부(인터넷/온프렘) 서비스를 메시에 등록
+	•	Sidecar: 네임스페이스의 egress 통신 범위 축소(성능·보안)
+	•	보안 리소스: PeerAuthentication(mTLS), RequestAuthentication(JWT), AuthorizationPolicy(RBAC)
+	•	관측/확장: Telemetry, EnvoyFilter/WasmPlugin
+
+### Virtual Host란?
+	•	Envoy 개념: 하나의 리스너에서 여러 도메인(Host/SNI) 별로 각기 다른 라우팅 테이블을 갖는 단위
+	•	Istio에서: VirtualService.spec.hosts 항목이 가상 호스트 역할
+	•	Ingress 경로: Gateway.spec.servers.hosts 와 VirtualService.spec.hosts 교집합일 때 매칭
+	•	메시 내부: 사이드카가 VirtualService.hosts를 기준으로 클러스터 라우트 구성
+
+### 리소스 간 관계(요약 흐름)
+	1.	Gateway 가 수신 포트/프로토콜/TLS·SNI를 연다
+	2.	VirtualService 가 호스트/경로/헤더 매칭으로 목적지 라우팅
+	3.	DestinationRule 이 목적지 버전(subset) 및 연결 정책 부여
+	4.	ServiceEntry 로 외부 도메인/IP를 메시에 등록
+	5.	Sidecar 로 egress 허용 범위를 축소
+	6.	mTLS/JWT/RBAC 으로 신뢰·인증·인가를 정책화
+
+### 자주 쓰는 트래픽 제어 레시피
+	•	카나리/버저닝: DestinationRule.subsets + VirtualService.http.route.weight
+	•	헤더/쿠키 기반 라우팅: match.headers/cookie/uri
+	•	회복력: retries, timeout, outlierDetection, connectionPool
+	•	장애 주입: fault.delay/abort 로 혼잡/장애 테스트
+	•	리라이트: rewrite, headers.request/response.add/remove
+
+### Ingress/Egress 패턴
+	•	Ingress: Gateway + VirtualService(hosts 교집합)로 외부→내부 라우팅
+	•	Egress(외부 호출)
+	•	간단: ServiceEntry 로 외부 목적지 등록 후 직접 아웃바운드
+	•	감사/고정 IP: Egress Gateway 경유 + VirtualService 로 경로 고정
+
+### 보안(Zero-Trust)
+	•	mTLS: PeerAuthentication(STRICT) + DestinationRule.trafficPolicy.tls(mode: ISTIO_MUTUAL)
+	•	인증: RequestAuthentication 로 JWT 검증
+	•	인가: AuthorizationPolicy 로 주체/대상/조건 기반 허용 리스트
+
+### 성능·스코프 최적화
+	•	Sidecar 로 egress 대상 축소(기본 */* → 필요한 서비스/네임스페이스/도메인만)
+	•	OutlierDetection 으로 불량 인스턴스 자동 격리, LB 가중치로 비율 제어
+
+### YAML 예시
+
+예시 ① Ingress + Virtual Host + 카나리(80%:v1, 20%:v2)
+
+```yaml
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: web-gw
+  namespace: web
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port: { number: 443, name: https, protocol: HTTPS }
+    tls: { mode: SIMPLE, credentialName: web-tls }
+    hosts: ["shop.example.com"]
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: cart
+  namespace: web
+spec:
+  host: cart.web.svc.cluster.local
+  trafficPolicy:
+    loadBalancer: { simple: ROUND_ROBIN }
+    outlierDetection: { consecutive5xx: 5, interval: 2s, baseEjectionTime: 30s }
+  subsets:
+  - name: v1
+    labels: { version: v1 }
+  - name: v2
+    labels: { version: v2 }
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: cart
+  namespace: web
+spec:
+  hosts: ["shop.example.com"]          # ← Virtual Host
+  gateways: ["web/web-gw"]
+  http:
+  - match:
+    - uri: { prefix: "/cart" }
+    route:
+    - destination: { host: cart.web.svc.cluster.local, subset: v1, port: { number: 8080 } }
+      weight: 80
+    - destination: { host: cart.web.svc.cluster.local, subset: v2, port: { number: 8080 } }
+      weight: 20
+    retries: { attempts: 2, perTryTimeout: 1s }
+    timeout: 3s
+```
+
+예시 ② mTLS(STRICT) + JWT + 인가(RBAC)
+
+```yaml
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: mtls-strict
+  namespace: web
+spec:
+  mtls: { mode: STRICT }
+---
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: jwt
+  namespace: web
+spec:
+  selector: { matchLabels: { app: cart } }
+  jwtRules:
+  - issuer: "https://login.example.com/"
+    jwksUri: "https://login.example.com/.well-known/jwks.json"
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-premium
+  namespace: web
+spec:
+  selector: { matchLabels: { app: cart } }
+  action: ALLOW
+  rules:
+  - to:
+    - operation: { paths: ["/cart/checkout"], methods: ["POST"] }
+    when:
+    - key: request.auth.claims[tier]
+      values: ["premium"]
+```
+
+예시 ③ 외부 API를 Egress Gateway로만 나가게(고정 egress IP·감사)
+
+```yaml
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata: { name: ext-payments, namespace: web }
+spec:
+  hosts: ["api.payments.com"]
+  ports: [{ number: 443, name: tls, protocol: TLS }]
+  resolution: DNS
+  location: MESH_EXTERNAL
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata: { name: vs-ext-pay, namespace: web }
+spec:
+  hosts: ["api.payments.com"]
+  gateways: ["istio-system/egressgateway"]
+  tls:
+  - match:
+    - port: 443
+      sniHosts: ["api.payments.com"]
+    route:
+    - destination:
+        host: istio-egressgateway.istio-system.svc.cluster.local
+        port: { number: 443 }
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata: { name: dr-egress, namespace: istio-system }
+spec:
+  host: istio-egressgateway.istio-system.svc.cluster.local
+  trafficPolicy:
+    tls: { mode: ISTIO_MUTUAL }
+```
+
+
+### 체크리스트
+	•	Gateway.servers.hosts ↔ VirtualService.hosts 교집합 확인(SNI/Host 매칭)
+	•	DestinationRule.subsets.labels ↔ Pod 라벨 일치
+	•	mTLS STRICT 시 DestinationRule.tls(mode: ISTIO_MUTUAL) 설정
+	•	외부 호출은 ServiceEntry 등록, Egress Gateway 경유 시 고정 출구·감사 용이
+	•	Sidecar 로 egress 범위 축소(성능·보안 최적화)
+
+### 자주 나오는 함정
+	•	VirtualService.hosts 와 Gateway.hosts 불일치 → Ingress 매칭 실패
+	•	카나리 가중치만 조정하고 subsets 라벨 미배치 → 전량 v1로 라우팅
+	•	STRICT mTLS 인데 DestinationRule.tls 누락 → 503
+	•	Egress는 열었지만 Sidecar 스코프 기본값(*/*) 방치 → 라우트 범람/성능 저하
+
+### 예상문제 3개
+	1.	객관식: Ingress에서 Virtual Host 매칭이 성립하려면?
+	•	A. DestinationRule.host = VirtualService.hosts
+	•	B. ServiceEntry.hosts = VirtualService.hosts
+	•	C. Gateway.servers.hosts ∩ VirtualService.hosts 가 교집합
+	•	D. PeerAuthentication.mode = STRICT
+정답: C
+	2.	단답형: 카나리(v1/v2) 기준을 어디에 정의하며 무엇과 일치해야 하는가?
+	•	정답: DestinationRule.subsets.labels 에 정의하며, Deployment의 Pod 라벨과 일치해야 한다.
+	3.	서술형: 외부 결제 API 호출을 고정 egress IP 로 집출하고 감사를 강화하려면 어떤 리소스를 어떻게 조합하나?
+	•	모범요지: ServiceEntry 로 외부 도메인 등록 → VirtualService 로 Egress Gateway 경유 라우팅 → Egress GW에 고정 퍼블릭 IP/NAT 부여 및 AuthorizationPolicy/Telemetry 적용.
+
+⸻
+
+## ExpressRoute(전용선) 가용성 선택 치트시트 — 오픈북용
+
+### TL;DR
+- **거점(도시) 장애까지** 버티려면 → **ExpressRoute Metro** *(또는 서로 다른 Peering Location 2개)*
+- **다른 지오/해외 리전 VNet** 연결 → **Premium Add-on**
+- **On-Prem ↔ On-Prem** 을 Azure 백본으로 연결 → **Global Reach**
+- **게이트웨이/존 이중화** → **ErGw3AZ(Zone-redundant) + Active-Active**
+- **레이턴시/처리량 개선** → **FastPath 지원 GW**
+- **회선 자체 암호화** → **ExpressRoute Direct + MACsec** *(또는)* **IPsec over ER**
+
+### 요구조건 ➜ 제품/옵션 맵
+| 요구조건/문제 | 선택 |
+|---|---|
+| 회선/포트/장비 이중화(기본) | **ER 회선 1개(이중 포트)** + **ErGw3AZ** + **Active-Active** |
+| **Peering Location(거점) 장애 대비** | **ExpressRoute Metro** *또는* 서로 다른 Location에 **ER 회선 2개** |
+| **타 지오(해외) 리전 VNet 연결** | **Premium Add-on** |
+| **On-Prem ↔ On-Prem** 전용 경로 | **Global Reach** |
+| 고성능/저지연 | **FastPath + 고급 GW SKU(ErGw3AZ/UltraPerformance)** |
+| 회선 레벨 암호화 | **ExpressRoute Direct + MACsec** *또는* **IPsec over ER** |
+| QoS/대역폭 보장 | **설계·계약 사안**(ER 자체 QoS 기능 없음) |
+
+### 용어 빠른정리
+- **ER Circuit**: 전용선 **논리 회선**(MSEE↔통신사). 기본 **이중 포트**.
+- **Peering Location**: 사업자와 MS가 만나는 **물리 거점**(도시 단위).
+- **ER Gateway**: VNet 종단. **ErGw3AZ(Zone-redundant)** 권장, **Active-Active** 가능.
+- **Premium Add-on**: **타 지오 리전 연결/라우트 한계 확장**(가용성 기능 아님).
+- **Global Reach**: **On-Prem ↔ On-Prem** 을 **Azure 백본**으로 연결.
+- **ExpressRoute Metro**: 같은 메트로의 **서로 다른 Location 2곳**을 단일 논리 회선으로 묶어 **거점 이중화**.
+- **FastPath**: 데이터 경로에서 **GW 우회**로 레이턴시/처리량 개선(지원 SKU 필요).
+- **ExpressRoute Direct**: **10/100Gb 전용 포트**, **MACsec** 가능.
+
+### 가용성 범위별 설계 패턴
+
+#### 1) 기본 HA(장비/포트/존)
+- 구성: **ER 회선 1개(이중 포트)** + **ErGw3AZ** + **Active-Active**
+- 커버: 장비/포트 장애, GW 존 장애
+- 미커버: **Peering Location 전체 장애**
+
+#### 2) 거점(도시) 장애까지
+- **ExpressRoute Metro** *(단일 논리 회선, Location 2곳)*
+- 또는 **Location A/B에 ER 회선 2개** + 통신사 **이원화**
+
+#### 3) 리전 DR/다지오
+- 동일 지오(Central↔South): **Standard**
+- **타 지오(해외 리전)**: **Premium Add-on**
+
+#### 4) On-Prem ↔ On-Prem
+- 양측 **ER 회선** 보유 + **Global Reach** 활성화
+
+#### 5) 성능/암호화
+- **FastPath + 고급 GW SKU** / **ExpressRoute Direct + MACsec**
+- Direct 불가 시 → **IPsec over ER(VPN 병행)**
+
+### 미니 플로우차트
+
+```text
+[거점 장애까지?] --예--> [ExpressRoute Metro] or [Dual Location 2회선]
+       |
+       아니오
+       v
+[기본 HA만?] --예--> [ER 1회선(이중포트) + ErGw3AZ + Active-Active]
+       |
+       v
+[타 지오 VNet 필요?] --예--> [Premium Add-on]
+       |
+       v
+[On-Prem 간도 연결?] --예--> [Global Reach]
+       |
+       v
+[저지연/처리량↑?] --예--> [FastPath + 적절 GW SKU]
+       |
+       v
+[회선 암호화 필요?] --예--> [Direct+MACsec] or [IPsec over ER]
+```
+
+### 체크리스트
+	•	ErGw3AZ + Active-Active 사용
+	•	Metro 또는 Dual Location으로 거점 이중화 설계
+	•	Premium Add-on은 타 지오 연결 목적임을 명시
+	•	Global Reach는 On-Prem↔On-Prem 용도임을 구분
+	•	FastPath 지원 여부와 필요성 확인
+	•	암호화는 Direct+MACsec 또는 IPsec over ER로 설계
+
+### 자주 나오는 함정
+	•	Premium = 가용성이라고 오해 ❌ → 가용성 아님, 다지오 연결/라우트 확장용
+	•	거점 장애를 이중 포트로 해결 가능하다고 오해 ❌ → Metro 또는 Dual Location 필요
+	•	QoS/대역폭 보장을 ER 기능으로 기대 ❌ → 통신사 계약/설계 사안
+	•	FastPath 자동 적용 기대 ❌ → 지원 SKU/구성 필요
+
+
+## Storage/DB 암호화 — 오픈북 치트시트 (GFM)
+
+### 한눈에 개념 맵
+- **저장소 at-rest**: **SSE**(기본 자동) → **PMK**(플랫폼 키) / **CMK**(고객 키·Key Vault) / *(일부 서비스)* **이중 암호화**
+- **클라이언트 측 암호화(CSE)**: 앱/SDK가 업로드 전에 암/복호, **키 분실 시 복구 불가**
+- **DBMS**
+  - **TDE**: 데이터/로그/백업 **파일 전체** 암호화(컬럼 아님, 쿼리 동작 불변)
+  - **Always Encrypted(컬럼)**: 특정 컬럼을 **클라이언트 드라이버**가 암/복호(서버는 평문 미보유)
+  - **DDM**: **표시 마스킹**일 뿐 암호화 아님
+- **전송구간**: TLS(HTTPS/SMB3/NFS-TLS/JDBC-TLS) 별도 고려
+- **키 관리**: Key Vault(+Managed Identity/RBAC/회전), BYOK/MHSM(HSM)
+
+### 저장소(Blob/Files/Disk) at-rest 암호화
+#### SSE(Server-Side Encryption)
+- **기본값**: 별도 설정 없어도 저장 시 자동 암호화.
+- **키 종류**
+  - **PMK**: Microsoft 관리 키(운영 간편, 비용 無).
+  - **CMK**: **Key Vault**의 고객 키로 암호화(**규제/감사** 대응, **키 회전/폐기** 통제).
+- **이중 암호화(Double Encryption)**: 일부 스토리지/지역/계층에서 제공(규제 대응용).
+
+#### CSE(Client-Side Encryption)
+- 앱/SDK가 **업로드 전에** 암호화하여 저장(서버는 **암호문만** 보관).
+- **장점**: 제3자 노출 최소화. **단점**: 키 분실 시 **영구 복구 불가**, 앱 구현/성능 부담.
+
+#### 자주 나오는 함정
+- “**CMK** 쓰면 평문 접근 불가” → ❌ **RBAC/ACL 허용** 시 서비스가 **복호 후 평문 제공**.
+- “사설망(Private Endpoint)이면 전송구간 암호화 불필요” → ❌ **TLS는 별도**로 유지.
+- “Archive/Cold 계층은 암호화 예외” → ❌ **SSE는 모든 계층 적용**.
+
+### DBMS 암호화(출제 빈도 높음: 컬럼 암호화 vs 마스킹 함정)
+#### TDE(Transparent Data Encryption)
+- **목적**: 파일·백업 **매체 탈취** 방어.
+- **영향**: 쿼리/인덱스/LIKE/정렬/조인 **영향 없음**(컬럼 암호화 아님).
+
+#### Always Encrypted(컬럼 암호화)
+- **동작**: **클라이언트 드라이버**가 암/복호 → 서버/DBA는 **평문 미접근**.
+- **키**: CMK(Key Vault 등) → CEK로 컬럼 암호화.
+- **모드**
+  - **Deterministic**: 동일 평문→동일 암호문 → **동등 비교/조인 가능**, **패턴 노출 위험**.
+  - **Randomized**: 매번 다른 암호문 → **보안↑**, **검색/조인 불가**.
+- **제약**: LIKE/범위/정렬/함수/인덱스에 제한. **Enclave**(SGX 등) 환경에서 일부 완화 가능.
+
+#### DDM(Dynamic Data Masking)
+- **표시 마스킹**(클라이언트/툴에서 **가려 보이게**). **저장은 평문**, 권한자는 **원문** 조회 가능 → **암호화 아님**.
+
+#### 컬럼 암호화 개념 예시(T-SQL)
+```sql
+-- CMK/CEK 개념: CMK(Key Vault)로 CEK를 보호, 컬럼은 CEK로 암호화
+CREATE TABLE Customer (
+  Id   INT IDENTITY PRIMARY KEY,
+  Name NVARCHAR(100) NOT NULL,
+  SSN  NVARCHAR(13)
+    ENCRYPTED WITH (
+      COLUMN_ENCRYPTION_KEY = CEK1,
+      ENCRYPTION_TYPE       = DETERMINISTIC,  -- 동등 비교/조인 허용
+      ALGORITHM             = 'AEAD_AES_256_CBC_HMAC_SHA_256'
+    ) NULL
+);
+```
+
+### 전송구간(TLS)
+- **Storage**: HTTPS(Blob/Files), SMB3 암호화, NFS-TLS(지원 환경).
+- **DB**: JDBC/ODBC/TDS TLS. **Private Endpoint**/사설망이어도 TLS는 **권장**.
+
+### 키 관리·감사·규정
+- **Key Vault**: RBAC + **Managed Identity**, **키 회전 주기**/책임자 문서화.
+- **BYOK/MHSM(HSM)**: 강한 규제 요건 시.
+- **폐기 영향**: 키 폐기 = 데이터 **영구 접근 불가**(특히 **CSE/AE**). **Risk Acceptance** 기록.
+- **감사**: 키 사용/회전/거부 이벤트를 **Monitor/Activity/Defender**로 수집.
+
+### 시험 함정 체크리스트(빠른 정답 선택 가이드)
+- [ ] “**TDE = 컬럼 암호화**” → ❌ (파일 암호화, 쿼리 영향 없음)
+- [ ] “**DDM = 암호화**” → ❌ (표시 마스킹일 뿐)
+- [ ] “**AE(Randomized)**인데 검색/조인 필요” → ❌ (불가)
+- [ ] “**Storage CMK**면 평문 불가” → ❌ (서비스가 복호 제공 가능)
+- [ ] “**CSE**는 키 없어도 복구 가능” → ❌ (불가)
+- [ ] “사설망이면 **TLS 불필요**” → ❌ (여전히 필요/권장)
+
+### 비교 표(요지)
+| 항목 | TDE | Always Encrypted(컬럼) | DDM | Storage SSE(PMK/CMK) | CSE |
+|---|---|---|---|---|---|
+| 보호 단위 | 파일/백업 | **특정 컬럼** | 표시 | 저장 시 객체/디스크 | 객체(앱 암호화) |
+| 서버 평문 접근 | 가능 | **불가** | 가능 | 가능 | 불가(앱만 키) |
+| 앱 수정 | 불필요 | **드라이버/연결/코드 영향** | 불필요 | 불필요 | **필요** |
+| 검색/조인 | 영향 없음 | 제한(Deterministic 권장) | 영향 없음 | 영향 없음 | 앱 처리 |
+| 주 목적 | 미디어 탈취 방어 | 최소공개/규제 | 화면 보호 | 규제/키 소유권 | 제3자 노출 최소화 |
+
+### 예상문제 3개
+1) **객관식**  
+민감 컬럼(예: 주민번호)을 서버/DBA가 평문으로 보지 못하게 하면서 **동등 비교** 검색이 필요하다. 가장 적절한 선택은?  
+- A. **Always Encrypted(Deterministic) + Key Vault CMK + 드라이버 구성**  
+- B. Always Encrypted(Randomized) + LIKE 검색  
+- C. TDE + DDM  
+- D. Storage CSE  
+**정답:** A
+
+2) **단답형**  
+“DDM은 암호화가 아니다”를 한 줄로 설명하라.  
+**정답 예시:** DDM은 **표시 마스킹**만 수행하고 저장 데이터는 **평문**이라 권한자는 원문을 볼 수 있다.
+
+3) **서술형**  
+AE(Randomized) 적용 후 검색/정렬/조인이 불가하다. **보안**과 **기능 요구**를 균형 있게 만족시키는 개선 2가지를 쓰고, 각 단점 1개씩 적어라.  
+**모범요지:** (1) **Deterministic**로 전환 → 동등 비교/조인 가능, **패턴 노출 위험** 증가.  
+(2) **분리 설계**(식별키=Deterministic, 고보호 필드=Randomized) → 기능 충족, **설계/운영 복잡도** 증가.
+
+
+## Azure VNet Flow Logs — 두 가지 종류 비교(오픈북 치트시트)
+
+### 한눈에 요약
+- **종류는 두 가지**  
+  1) **Virtual Network Flow Logs** *(권장, VNet 단위 수집)*  
+  2) **NSG Flow Logs** *(레거시, NSG 단위 수집 — 은퇴 예정)*  
+- **권장 사용**: 새 구축/표준화는 **Virtual Network Flow Logs**로 일원화. 동일 리소스에 **두 로그를 동시 활성화하면 중복 비용**이 발생할 수 있으므로 주의.
+- **저장소**: Blob(StorageV2 권장) + 수명주기(Lifecycle)로 비용 최적화(Hot→Cool→Archive).
+
+---
+
+### 무엇이 다른가? (핵심 비교표)
+
+| 항목 | **Virtual Network Flow Logs** | **NSG Flow Logs** |
+|---|---|---|
+| **스코프/활성 위치** | **VNet 단위**: 한 번에 VNet 전체 흐름 수집 | **NSG 단위**: Subnet/NIC에 연결된 **각 NSG별** 개별 설정 필요 |
+| **정책 평가** | NSG 규칙 **+**(선택) 상위 보안 관리자 규칙(AVNM) 반영, VNet 암호화 상태 필드 제공 | **NSG 규칙만** 기준(서브넷/ NIC에 바인딩된 NSG의 Allow/Deny) |
+| **커버리지** | VNet 경계 관점(게이트웨이/서비스 연계 커버 폭넓음) | AppGW v2 서브넷 등 일부 조합 제약 존재 |
+| **운영 난이도** | **상위에서 일괄 관리**(리소스 누락·중복 낮음) | **여러 NSG에 반복 적용**(누락/중복 개연성 높음) |
+| **지원 상태** | **현행/권장** | **레거시(은퇴 예정)** — 신규 도입 지양 |
+| **포맷/주기** | L4 흐름, JSON, 일반적으로 **1분 단위** 롤업 | L4 흐름, JSON, 일반적으로 **1분 단위** 롤업 |
+
+> 포인트: “어디서 켜느냐(스코프)”가 가장 큰 차이. **VNet Flow Logs**는 상위에서 **한 방**에, **NSG Flow Logs**는 바인딩된 **각 NSG마다**.
+
+---
+
+### 언제 무엇을 쓰나?
+- **새 프로젝트/표준화 목표** → **Virtual Network Flow Logs** 단일화.  
+- **기존에 NSG Flow Logs만 사용** → **VNet Flow Logs로 전환** 계획 수립 후, 대시보드/쿼리/알림 이식.  
+- **게이트웨이/하이브리드 경로까지 가시화** → VNet Flow Logs가 일관되게 수집하기 용이.
+
+---
+
+### 설정 체크리스트
+#### 공통
+- 해당 리전에 **Network Watcher**가 **활성화**되어 있어야 함.
+- **Blob Storage 계정** 준비(로그 전용 컨테이너 권장, 수명주기 규칙 필수).
+- **Private Endpoint/방화벽**으로 사설화 + **CMK(Key Vault)** 필요 시 적용.
+- **중복 수집 방지**: 동일 VNet/NSG 대상에 두 로그를 **동시에 켜지 않기**.
+
+#### VNet Flow Logs 특이사항
+- 저장소 계정은 **동일 테넌트/가급적 동일 리전**에 두고, 키/접속 변경 시 **재연결 확인**.
+- Private Endpoint 흐름은 **소스 VM 측 관점**으로 로깅됨.
+
+#### NSG Flow Logs 특이사항(레거시)
+- Subnet/NIC에 연결된 **모든 NSG에 각각 활성화**해야 정확.
+- AppGW/ER/VPN 서브넷 조합은 제약이 있을 수 있어 가이드 확인.
+
+---
+
+### 저장소/비용 운영
+- **수명주기 규칙(예시)**: 30일 **Cool**, 180일 **Archive**, 730일 **삭제**.
+- **소형 JSON 파일**이 다량 생성됨 → **Parquet로 컴팩션** + 파티션 디렉터리 체계화:  
+  `service=vnet/region=kr-central/vnet=<name>/yyyy=2025/mm=08/dd=28/hh=10/`
+- **감사/불변**: Immutable(시간기반 보존) / Legal Hold를 **로그 전용 컨테이너**에만 적용.
+
+```json
+{
+  "rules": [{
+    "name": "flowlogs-lifecycle",
+    "enabled": true,
+    "type": "Lifecycle",
+    "definition": {
+      "filters": { "blobTypes": ["blockBlob"], "prefixMatch": ["flowlogs/"] },
+      "actions": {
+        "baseBlob": {
+          "tierToCool":    { "daysAfterModificationGreaterThan": 30 },
+          "tierToArchive": { "daysAfterModificationGreaterThan": 180 },
+          "delete":        { "daysAfterModificationGreaterThan": 730 }
+        }
+      }
+    }
+  }]
+}
+```
+
+---
+
+### 분석/연계
+- **Traffic Analytics**(Azure Monitor)로 Top talkers/허용·거부 트렌드/지리/포트 분석.  
+- **ADX(Kusto)** 외부 테이블 연결 → **KQL**로 대용량 조회.  
+- **SIEM**(Sentinel/Splunk 등)으로 실시간 상관 분석.
+
+---
+
+### IaC 예시
+#### Bicep — VNet Flow Logs(개념 예시)
+```bicep
+param location string = resourceGroup().location
+param vnetId string
+param storageId string
+
+resource nw 'Microsoft.Network/networkWatchers@2023-09-01' existing = {
+  name: 'NetworkWatcher_${location}'
+  location: location
+}
+
+resource fl 'Microsoft.Network/networkWatchers/flowLogs@2023-09-01' = {
+  name: '${nw.name}/vnet-flowlogs'
+  properties: {
+    targetResourceId: vnetId         // ← VNet 리소스 ID
+    enabled: true
+    storageId: storageId
+    format: {
+      type: 'JSON'
+      version: 2
+    }
+    flowAnalyticsConfiguration: {
+      networkWatcherFlowAnalyticsConfiguration: {
+        enabled: true // Traffic Analytics 사용 시
+        workspaceResourceId: '<LogAnalytics-Resource-ID>'
+        trafficAnalyticsInterval: 60
+      }
+    }
+  }
+}
+```
+
+#### (참고) NSG Flow Logs — 레거시
+```bicep
+param nsgId string
+param storageId string
+
+resource flNsg 'Microsoft.Network/networkWatchers/flowLogs@2023-09-01' = {
+  name: 'NetworkWatcher_${location}/nsg-flowlogs'
+  properties: {
+    targetResourceId: nsgId          // ← NSG 리소스 ID
+    enabled: true
+    storageId: storageId
+    format: { type: 'JSON'; version: 2 }
+  }
+}
+```
+
+---
+
+### 운영 관제 체크리스트
+- [ ] 수집 실패/지연 알림: 진단 설정/활동 로그 경보
+- [ ] 저장 용량/비용 대시보드: Blob Inventory, Cost Management
+- [ ] 수명주기/불변/삭제 이벤트 **감사** 적재
+- [ ] 중복 수집 여부 상시 점검(VNet vs NSG)
+
+---
+
+### 예상문제 3개
+1) **객관식**  
+VNet 전체 흐름을 한 번에 수집하고, NSG별 개별 설정을 줄이려면 어떤 방식을 택해야 하는가?  
+- A. NSG Flow Logs  
+- **B. Virtual Network Flow Logs**  
+- C. 둘 다  
+- D. Flow Logs 비활성화 후 Traffic Analytics만  
+**정답: B**
+
+2) **단답형**  
+동일 자원에 VNet Flow Logs와 NSG Flow Logs를 동시에 켜면 주로 어떤 문제가 생기는가?  
+**정답 예시:** **중복 기록으로 비용 증가** 및 분석 중복/혼선.
+
+3) **서술형**  
+하이브리드(ER/VPN)와 Private Endpoint가 혼재된 대규모 허브-스포크 네트워크에서 흐름 가시성과 비용 최적화를 동시에 달성하려면 어떤 설계가 적절한가?  
+**모범요지:** 허브/스포크 **각 VNet에 Virtual Network Flow Logs**를 표준으로 적용하고, **NSG Flow Logs는 비활성화**. Blob Lifecycle로 티어링, Event Grid→Functions로 **JSON→Parquet 컴팩션**, ADX KQL로 분석, Traffic Analytics로 요약 지표 시각화. Private Endpoint 트래픽은 **소스 VM 기준** 로깅임을 감안해 필터/태깅을 일관화.
+
+## AKS 접근제어(Entra ID 중심) — 인증/인가 3경로 치트시트 (GFM)
+
+### 한눈에 요약
+- **사람(개발/운영자)**: **Microsoft Entra ID(OIDC)** + `kubelogin`으로 **인증**, 권한은 **Kubernetes RBAC** *또는* **Azure RBAC for Kubernetes**로 **인가** ← **권장**
+- **브레이크글래스**: **로컬 관리자 kubeconfig(클러스터-admin)**. 가급적 **비활성화/보관**하고 **필요 시에만 사용**.
+- **자동화/봇/CI**: **Kubernetes ServiceAccount**(짧은 수명 토큰, 최소권한). *참고*: **Workload Identity**는 **Azure 리소스 접근**용이며 **K8s API 인증 대체가 아님**.
+
+---
+
+### 경로 1 — Entra ID 기반 사용자 접근(권장)
+
+#### 인증(로그인 흐름)
+- 사용자는 `kubectl` 호출 시 **OIDC**(Entra ID)로 로그인.
+- kubeconfig는 **exec 플러그인**(`kubelogin`)을 통해 토큰을 받아 API Server에 제시.
+- 로그인 방법: 브라우저/디바이스 코드/CLI 토큰(`--login azurecli`) 등.
+
+```bash
+# 필수 도구
+az extension add -n aks-preview     # 필요 시
+az aks install-cli                  # kubelogin 설치(환경에 따라)
+# kubeconfig 병합
+az aks get-credentials -g <rg> -n <cluster> --overwrite-existing
+# (조직 정책에 따라) 로컬 계정 비활성화 상태 권장
+```
+
+#### 인가(권한 부여) — 두 가지 모드
+- **모드 A: Kubernetes RBAC**
+  - Entra **사용자/그룹(Object ID)** 를 **(Cluster)RoleBinding**에 매핑.  
+  - 세분화/네임스페이스 단위 설계 용이.  
+  - **예)** `ClusterRole=admin`을 `Group=aks-platform-admins`에 바인딩.
+- **모드 B: Azure RBAC for Kubernetes**
+  - Azure의 **빌트인 역할**(예: *Azure Kubernetes Service RBAC Viewer/Writer/Admin*)을 **Azure Role Assignment**로 부여.  
+  - 중앙집중 거버넌스(Entra+Azure RBAC) 및 PIM/감사 연계에 유리.  
+  - 세밀 정책은 K8s RBAC보다 제한적일 수 있어 **혼합 설계** 고려.
+
+> 실무 팁: **사람 = Entra ID + (Azure RBAC for K8s 또는 K8s RBAC)**, **토큰 수명·MFA·조건부 액세스**는 Entra 정책으로 통제.
+
+---
+
+### 경로 2 — 로컬 관리자 kubeconfig(브레이크글래스)
+
+#### 개요
+- `az aks get-credentials --admin` 으로 받는 **클러스터-admin 인증서** 기반 kubeconfig.
+- **목적**: **Entra 장애/비상조치** 등 **브레이크글래스**.
+- **권장**: 기본 **비활성화(`--disable-local-accounts`)**, 오프라인 금고에 저장, **접근기록/경보**.
+
+#### 운영 수칙
+- 사용 후 **즉시 회수/폐기**, **API Server Authorized IP Ranges**로 접근원 IP 제한.
+- **Private Cluster** + Bastion/프록시 경유.
+- **Cert/자격 증명 로테이션** 표준 운영 절차 수립.
+
+---
+
+### 경로 3 — ServiceAccount(자동화/봇/CI)
+
+#### 개요
+- K8s **ServiceAccount(SA)** + **Role/RoleBinding**으로 **최소권한 부여**.
+- **Bound SA Token**(짧은 수명 OIDC JWT) 사용(시크릿 장기 토큰 지양).
+- GitHub Actions/GitLab CI 등에서 K8s 배포 시 **SA 토큰만으로 kubectl** 수행 가능.
+
+```yaml
+# 예시: 네임스페이스 단위 read-only SA
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deploy-bot
+  namespace: web
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ro
+  namespace: web
+rules:
+- apiGroups: [""]
+  resources: ["pods","services","configmaps"]
+  verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ro-bind
+  namespace: web
+subjects:
+- kind: ServiceAccount
+  name: deploy-bot
+  namespace: web
+roleRef:
+  kind: Role
+  name: ro
+  apiGroup: rbac.authorization.k8s.io
+```
+
+> 주의: **Workload Identity(Entra OIDC 연동)** 는 **Pod→Azure 리소스** 자격 증명(예: Key Vault/Storage)에 쓰이며, **K8s API 권한**은 **여전히 SA+RBAC**로 별도 관리.
+
+---
+
+### 네트워크/접근 경계 보강(사람·봇 공통)
+- **API Server Authorized IP Ranges**: 허용 소스 IP만 접근 가능.
+- **Private Cluster**: API 서버 **사설 IP화**, 운영망에서만 접근.
+- **네트워크 보안**: 방화벽/프록시/NAT 경유, 이그레스 고정 IP(감사/정책).
+- **감사·모니터링**: Audit Log(Cluster), Azure Monitor(Container Insights), Defender for Cloud 경보.
+
+---
+
+### 운영 체크리스트
+- [ ] **Entra ID 통합 활성화**(OIDC), `kubelogin` 표준 도구화.
+- [ ] **모드 선택**: *K8s RBAC* vs *Azure RBAC for K8s*(또는 혼합) 문서화.
+- [ ] **로컬 계정 비활성화** + 브레이크글래스 보관/경보.
+- [ ] **SA 최소권한** + **짧은 수명 토큰**, 네임스페이스 분리.
+- [ ] **API Server IP 제한** / **Private Cluster** / **감사 로그**.
+- [ ] **PIM/조건부 액세스/MFA**로 사람 접근 강화.
+
+---
+
+### 자주 나오는 함정
+- “**Service Principal**로 사람 접근” → ❌ (인간 사용자엔 **Entra 사용자/그룹** 사용, SP는 앱/자동화)
+- “**Workload Identity**면 K8s RBAC 불필요” → ❌ (Azure 리소스용, **K8s API 권한은 별도**)
+- “로컬 admin kubeconfig 항상 사용” → ❌ (**브레이크글래스 전용**)
+- “Azure RBAC for K8s = K8s RBAC 완전 대체” → ❌ (범위/세분화 차이, 필요 시 **혼합**)
+
+---
+
+### 예상문제 3개
+
+1) **객관식**  
+AKS에서 **사람 사용자**의 표준 접근 방식으로 가장 적절한 것은?  
+- A. ServiceAccount 토큰으로 로그인  
+- **B. Entra ID(OIDC) + `kubelogin` 인증, 권한은 (Azure RBAC for K8s 또는 K8s RBAC)**  
+- C. 항상 `--admin` kubeconfig 사용  
+- D. Workload Identity로 K8s API 호출  
+**정답:** B
+
+2) **단답형**  
+브레이크글래스용 **로컬 관리자 kubeconfig**를 평시 차단하려면 어떤 클러스터 옵션을 켜야 하나?  
+**정답 예시:** `--disable-local-accounts`(로컬 계정 비활성화).
+
+3) **서술형**  
+조직이 **Entra 기반 SSO·MFA·PIM**을 요구한다. AKS에서 **사람 접근**, **자동화 접근**, **네트워크 경계**를 포함한 표준 접근 제어 설계를 제시하라.  
+**모범요지:** 사람은 Entra OIDC + `kubelogin`, 인가는 Azure RBAC for K8s 또는 K8s RBAC(그룹 매핑). 로컬 admin 계정 비활성화, 브레이크글래스 금고 보관. 자동화는 SA 최소권한 + 짧은 수명 토큰(네임스페이스 분리). API Server Authorized IP Ranges/Private Cluster 적용, 감사·경보 구성(Defender/Monitor).
+
+
+
+## AKS 무중단 롤링/스케일-인 성능 가이드 — 시스템/유저 노드풀 & 프로브/종료 설정 (GFM)
+
+### 한눈에 요약
+- **노드풀 분리**: *System* 노드풀은 **클러스터/인프라 애드온 전용**, *User* 노드풀은 **비즈니스 워크로드 전용**으로 **taint/toleration**로 구분.  
+- **5xx 방지의 2축**  
+  1) **기동 시**: `startupProbe`→`readinessProbe`(준비 완료 전 노출 금지), `minReadySeconds`, 롤링업데이트 **`maxUnavailable: 0`**.  
+  2) **종료/스케일-인 시**: `preStop` 훅 + **충분한 `terminationGracePeriodSeconds`** + **PDB**로 **드레인→연결정리→엔드포인트 제거** 순서 보장.  
+- **오토스케일**: HPA(파드) ↔ Cluster Autoscaler(노드풀) **동작 순서·지연 파라미터**와 **PDB**의 상호작용을 이해.
+
+---
+
+### 시스템/유저 노드풀 설계(성능·안정성 기본)
+- **System 노드풀**  
+  - 목적: kube-system/모니터링/인그레스 등 **플랫폼 애드온**.  
+  - **Taint(예: `CriticalAddonsOnly=true:NoSchedule`)** 유지 → 애드온에 **toleration** 부여.  
+  - 스케일 변동 적게, **고가용(≥2~3 노드)**, 빠른 디스크(OS Ephemeral 선호), 고성능 VM.
+- **User 노드풀**  
+  - 목적: **앱 워크로드**. 오토스케일 허용, 워크로드 레이블/taint로 **클래스(웹, 배치, ML)** 분리.  
+  - **Cluster Autoscaler 활성화**(예: `minCount/maxCount`).  
+  - 장시간 I/O 앱은 **속성 맞는 VM SKU / 디스크** 분리(예: IOPS↑).
+
+#### 스케줄링 가이드
+- **PriorityClass**: platform(높음) ↔ app(표준) 계층.  
+- **TopologySpreadConstraints/PodAntiAffinity**: 동일 노드/존 쏠림 방지 → 스케일-인 시 대량 5xx 완화.  
+- **Requests/Limits** 준수(QoS 보장) + **`safe-to-evict` 주석**으로 데몬·사이드카 보호.
+
+---
+
+### (축 1) 컨테이너 **기동 시** 5xx 방지 — 탐침/롤링 파라미터
+- **`startupProbe`**: 느린 초기화 서비스의 **초기 부팅 보호막**(성공 전 **Liveness/Readiness 비활성**).  
+- **`readinessProbe`**: **정상 기동 완료 후에만** 엔드포인트 등록.  
+- **`livenessProbe`**: **자기치유용**(다운 판별/재시작); *레디니스 대체 X*.  
+- **배포 롤링 전략**:  
+  - **`maxUnavailable: 0`** (기존 용량 보존) + **`maxSurge: 1+`** (여유분 먼저 기동)  
+  - **`minReadySeconds`**(준비 후 N초 안정화), **`progressDeadlineSeconds`**(배포 실패 빠른 감지)
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 6
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0       # 기동 중 용량 보존
+      maxSurge: 2             # 여유 파드 먼저 올림
+  minReadySeconds: 10          # 준비 후 10초 안정화
+  progressDeadlineSeconds: 600
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata:
+      labels: { app: web, tier: frontend }
+    spec:
+      # 유저 노드풀만 스케줄하도록 (예: taint: role=user:NoSchedule)
+      tolerations:
+      - key: "role"           # ← 유저풀 taint 예시
+        operator: "Equal"
+        value: "user"
+        effect: "NoSchedule"
+      containers:
+      - name: app
+        image: myrepo/web:1.2.3
+        ports: [ { containerPort: 8080 } ]
+        readinessProbe:
+          httpGet: { path: /health/ready, port: 8080 }
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet: { path: /health/live, port: 8080 }
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        startupProbe:
+          httpGet: { path: /health/startup, port: 8080 }
+          failureThreshold: 30   # 최대 30×3s=90s 대기(아래 periodSeconds와 곱)
+          periodSeconds: 3
+```
+
+> **팁**: 레디니스는 **DB/캐시 연결 포함** “실사용 가능한 상태”를 의미해야 하며, **버전 전환 직후 캐시 워밍**이 필요하면 `minReadySeconds`로 급한 트래픽 유입을 지연.
+
+---
+
+### (축 2) **종료/스케일-인** 5xx 방지 — 드레인/종료 순서
+**목표: “엔드포인트 제거 → 기존 연결 마무리 → 프로세스 종료”**  
+- **`preStop`** 훅에서 **새 연결 수락 중단**(앱 자체 플래그/서버 종료) 후 **짧게 대기(예: 10~30s)**.  
+- **`terminationGracePeriodSeconds`**는 **최대 처리시간 + 버퍼**(gRPC/WebSocket은 더 길게).  
+- **레디니스 즉시 false** → 서비스 엔드포인트에서 **제거**(LB/Ingress 트래픽 차단).  
+- **PDB(PodDisruptionBudget)**: **동시 축출 상한**(예: `maxUnavailable: 1`)으로 오토스케일/드레인 충돌 시 5xx 억제.  
+- **Cluster Autoscaler**는 PDB/우선순위를 **존중**하므로, **PDB 없으면 대량 축출** 위험.
+
+```yaml
+# 파드 종료 시 단계: readiness false → preStop 처리 → grace 기간 내 종료
+spec:
+  terminationGracePeriodSeconds: 60
+  containers:
+  - name: app
+    lifecycle:
+      preStop:
+        exec:
+          command: ["/bin/sh", "-c", "curl -s localhost:8080/quit || true; sleep 15"]
+    # 위 /quit: 앱이 새 요청 수락 중단(Drain 신호)하도록 구현
+
+---
+# 동시 축출 제한: 가용성 보장
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: web-pdb }
+spec:
+  selector: { matchLabels: { app: web } }
+  maxUnavailable: 1
+```
+
+> **팁**: 인그레스/프록시 타임아웃(gRPC/WebSocket 포함) ≥ `terminationGracePeriodSeconds`로 **정렬**. 종료 중 **엔드포인트 제거 지연**이 없도록 레디니스 전환을 코드로 보장(예: `/quit`가 헬스체크 실패 상태로 전환).
+
+---
+
+### HPA × Cluster Autoscaler × 스케일-인 상호작용
+- **HPA(파드 수)**가 먼저 줄어들고 → **노드 여유 발생** → **Cluster Autoscaler(노드 수)**가 **지연 후** 축소.  
+- **지연 파라미터**(예시): *scaleDownDelayAfterAdd*, *scanInterval* 등(개념 이해).  
+- **PDB**가 있으면 **허용치 이상 축출 불가** → 노드 축소 지연/보류 ⟶ 5xx 대신 안정성↑.  
+- **장수 연결** 서비스는 **`preStop`+충분한 grace**와 **프록시 타임아웃 정렬**이 핵심.
+
+---
+
+### 서술형 모범 답안(요지 템플릿)
+> **“AKS에서 5xx를 줄이려면, 노드풀을 System/User로 분리해 인프라와 앱 스케줄을 분리하고, 롤링·스케일-인 시 ‘기동 타이밍’과 ‘종료 타이밍’을 엄격히 제어해야 한다. 기동 시엔 `startupProbe`로 초기화를 보호하고 `readinessProbe`가 성공하기 전에는 절대 엔드포인트에 노출하지 않는다. 배포는 `maxUnavailable: 0`과 `minReadySeconds`로 안정화 시간을 보장한다. 종료/스케일-인 시엔 `preStop`에서 수락 중단 신호를 보내고 `terminationGracePeriodSeconds`를 충분히 부여하여 기존 연결을 정상 완료시킨다. 동시에 PDB로 동시 축출을 제한해 Cluster Autoscaler와의 충돌을 방지한다. TopologySpread/Anti-Affinity로 쏠림을 방지하고, Requests/Limits·PriorityClass로 핵심 워크로드를 보호한다. 이 조합으로 엔드포인트 연결 타이밍을 통제해 롤링/스케일-인 전 구간에서 5xx를 예방한다.”**
+
+---
+
+### 체크리스트
+- [ ] System/User 노드풀 **분리**, taint/toleration 적용  
+- [ ] `startupProbe`/`readinessProbe`/`livenessProbe` **역할 구분**  
+- [ ] Deployment: **`maxUnavailable: 0`**, 적절한 **`maxSurge`**, **`minReadySeconds`**  
+- [ ] **`preStop`** 구현(+ 앱 수락중단 엔드포인트) & **충분한 `terminationGracePeriodSeconds`**  
+- [ ] **PDB**로 동시 축출 제한, **TopologySpread/Anti-Affinity**  
+- [ ] HPA/Cluster Autoscaler **동작 순서 이해**(지연 파라미터, PDB 영향)  
+- [ ] 인그레스/프록시 **타임아웃과 정렬**(gRPC/WebSocket 포함)
+
+---
+
+### 예상문제 3개
+1) **서술형**  
+롤링 업데이트 및 스케일-인 상황에서 5xx를 최소화하기 위한 **탐침·배포 전략·종료 시퀀스**를 설명하라.  
+**모범요지:** 위 “서술형 모범 답안” 참조(기동 타이밍: startup→readiness, 롤링: maxUnavailable 0/minReadySeconds, 종료: preStop+grace, PDB/토폴로지/오토스케일 상호작용).
+
+2) **단답형**  
+느린 초기화 앱에서 레디니스/라이브니스가 조기 실패하는 문제를 막기 위해 추가해야 하는 프로브는?  
+**정답:** `startupProbe`.
+
+3) **객관식**  
+스케일-인 시 파드 동시 축출로 5xx가 발생한다. **가장 직접적인** 완화책은?  
+- A. `livenessProbe` 간격을 늘린다  
+- **B. `PodDisruptionBudget`으로 `maxUnavailable`을 낮춘다**  
+- C. `maxSurge`를 0으로 한다  
+- D. `terminationGracePeriodSeconds`를 5로 줄인다  
+**정답:** B
+
+
+## Azure Service Bus — 치트시트 (GFM)
+
+### 핵심 개념 맵
+	•	Queue: 1:1(점대점) 비동기 큐. 소비자 수를 늘려 경합(Competing Consumers) 패턴으로 처리량 확장.
+	•	Topic / Subscription: 1:다 퍼블리시-서브스크라이브. Subscription마다 필터(SQL/Correlation) 로 메시지 선택·분기.
+	•	Delivery 모드:
+	•	Peek-Lock(권장): 메시지를 잠그고 처리 후 Complete()로 확정. 실패 시 Abandon/Dead-letter.
+	•	Receive-and-Delete: 수신 즉시 삭제(손실 위험).
+	•	Exactly-once에 가까운 처리: 본질은 at-least-once. 중복감지(Duplicate Detection) + 트랜잭션 + 멱등성으로 실무 달성.
+	•	Session(FIFO/그룹화): SessionId 동일 메시지는 순서 보장 + 단일 소비자로 처리. 상태(Session State) 저장 가능.
+	•	Dead-letter Queue(DLQ): MaxDeliveryCount 초과/필터 불일치/TTL 만료 등 격리 보관. DLQ는 각 큐/서브스크립션에 종속.
+	•	고급 기능: 스케줄링(예약 발송), Deferral(처리 지연/보류), 메시지 Defer/Defered retrieval, 지연 재시도.
+
+### SKU·성능·네트워킹 요약
+	•	Standard: 대부분 기능(토픽/세션/중복감지/스케줄링/트랜잭션) 제공, 공유 인프라.
+	•	Premium: 전용 리소스 격리(Messaging Unit), 예측 가능 성능·지연, 가용성 옵션 강화(예: 존 배치), 대규모 연결·고부하에 적합.
+	•	네트워킹: Private Endpoint/Private Link로 사설화, Firewall 규칙/IP 필터로 공용 접근 제어.
+	•	지역 복구: Geo-DR(alias) 로 네임스페이스 페어링/페일오버(메타데이터 수준). 데이터 복제는 애플리케이션 설계(양방향 복제/재발행) 가 필요.
+
+### 핵심 운영 파라미터
+	•	LockDuration: 5~300초. 긴 처리라면 자동 잠금 갱신(Auto-renew) 사용.
+	•	Message TTL: 만료 시 DLQ 이동(옵션에 따라).
+	•	MaxDeliveryCount: 재시도 횟수. 초과 시 DLQ.
+	•	DuplicateDetectionHistoryTimeWindow: 중복감지 기억 창(예: 10분). MessageId 가 반드시 고유해야 작동.
+	•	PrefetchCount: 성능 향상(왕복 감소). 단, 과도 프리페치 + 긴 처리는 잠금 만료 위험.
+
+### 필터링(토픽/서브스크립션)
+	•	CorrelationFilter: CorrelationId, MessageId, Subject(Label), 사용자 속성 등 정확 일치.
+	•	SQLFilter: 사용자 속성에 대한 SQL 표현식(예: priority > 5 AND region = 'KR').
+	•	Rule Action: 메시지에 헤더/속성 추가·변경.
+
+### 트랜잭션·중복·순서 보장
+	•	중복감지: 네임스페이스/엔터티에서 활성화 + MessageId 지정 ⇒ 창 내 중복 투입 자동 폐기.
+	•	트랜잭션: 동일 네임스페이스 내 다중 작업(완료+보내기 등) 을 한 단위로 커밋/롤백.
+	•	순서(FIFO): SessionId 기반으로 세션 처리기를 사용(세션 단일 소비자). 순서+중복을 함께 요구하면 세션 + 중복감지 병행.
+
+### 재시도·에러 처리 패턴
+	•	지수 백오프(Jitter 포함)로 일시 오류 흡수.
+	•	DLQ 운영: 원인 태그(사유/컬렉션) 기록 → KQL/워크플로우로 triage → 필요 시 재게시(리드라이브).
+	•	Poison 메시지: 재현·패치 후 수동/자동 리드라이브.
+	•	Idempotency: 업무 키를 MessageId로 매핑, 처리 로그/아웃박스로 중복 커밋 방지.
+
+### 운영·스루풋 팁
+	•	Processor 기반 소비자(Auto-complete 끄고 수동 Complete()): 예측 가능한 처리.
+	•	MaxConcurrentCalls / MaxConcurrentSessions: 워커 동시성 제어(세션 사용 시 세션 단위).
+	•	큰 메시지: 256KB(Std)/1MB(Prem) 근방이면 청크/Blob 오프로드 고려.
+	•	메트릭 관찰: Incoming/Outgoing Messages, Active/Dead-lettered, Server Errors, Throttled Requests, Connections, CPU/MU(Premium).
+
+### 코드 스니펫(예: .NET, 세션 + 중복감지 + 수동 완료)
+
+```javascript
+var client = new ServiceBusClient(connStr);
+var processor = client.CreateSessionProcessor(
+    "orders", new ServiceBusSessionProcessorOptions {
+        AutoCompleteMessages = false,
+        MaxConcurrentSessions = 8,
+        MaxConcurrentCallsPerSession = 1,   // 세션 내 순서 보장
+        PrefetchCount = 100
+    });
+
+processor.ProcessMessageAsync += async args => {
+    try {
+        // 멱등성: MessageId 로 중복 처리 방지 (예: Redis/DB 체크)
+        var msg = args.Message;
+        // 비즈니스 처리 ...
+        await args.CompleteMessageAsync(msg);   // 성공 시 확정
+    } catch (TransientException) {
+        await args.AbandonMessageAsync(args.Message); // 재시도 대상
+    } catch (Exception ex) {
+        await args.DeadLetterMessageAsync(args.Message, "ProcessingFailed", ex.Message);
+    }
+};
+processor.ProcessErrorAsync += err => {
+    Console.WriteLine(err.Exception);
+    return Task.CompletedTask;
+};
+await processor.StartProcessingAsync();
+```
+
+### 자주 나오는 함정
+	•	레디스/DB와의 분산 트랜잭션 기대 ❌ → 동일 네임스페이스 내 버스 작업만 트랜잭션. 외부 저장소는 Outbox/InBox 패턴.
+	•	중복감지 ON인데 MessageId 미설정 → 효과 없음.
+	•	세션 사용 중 동시성 2↑ → 순서 깨짐.
+	•	프리페치↑ + 처리 지연 → 락 만료로 이중 소비. 자동 Lock 갱신 또는 프리페치 튜닝.
+	•	Geo-DR이 데이터 동기화로 오해 → 메타데이터 페일오버일 뿐, 메시지 복제 아님.
+
+### 선택 가이드(비교)
+	•	Service Bus vs Storage Queue
+	•	Service Bus: 세션/FIFO, 트랜잭션, 중복감지, 필터링, 스케줄링 필요할 때.
+	•	Storage Queue: 초저가·단순 대량 쌓기/폴링, 기능 요구가 낮을 때.
+	•	Service Bus vs Event Hubs
+	•	Service Bus: 명령/워크플로우, 업무 트랜잭션.
+	•	Event Hubs: 텔레메트리/스트리밍(초당 수십만 이벤트, 소비자별 오프셋).
+
+### 체크리스트
+	•	큐/토픽에 중복감지(윈도)와 TTL/MaxDelivery/DLQ 정책 명시
+	•	세션/순서 필요 여부 판단 → SessionProcessor 채택
+	•	지수 백오프 + DLQ 운영 설계(리드라이브 절차 포함)
+	•	Private Endpoint/Firewall로 네트워크 경계 확정
+	•	멀티 엔티티 트랜잭션(가능 범위)과 멱등 처리 결합
+	•	대형 페이로드는 외부 저장소 + 포인터 패턴
+
+예상문제 3개
+	1.	객관식
+주문ID별로 순서 보장과 단일 소비자 처리가 필요하다. 가장 적절한 구성은?
+
+	•	A. 토픽 + SQL 필터
+	•	B. 큐(또는 토픽 서브스크립션) + SessionId=주문ID + Session Processor
+	•	C. 큐 + Prefetch=0
+	•	D. 토픽 + 여러 구독
+정답: B
+
+	2.	단답형
+중복감지를 활용하려면 엔티티 설정 외에 메시지에 어떤 필드를 반드시 지정해야 하는가?
+정답: MessageId(업무 키로 고유 값 설정).
+	3.	서술형
+Service Bus로 at-least-once 환경에서 멱등 처리와 DLQ 운영을 결합해 “사실상 정확히 한 번”을 달성하는 방법을 설명하라.
+모범요지: MessageId를 업무 키로 고정 + 중복감지 윈도 활성화, 소비자는 Outbox/InBox/처리로그로 멱등성 확보, 지수 백오프 재시도 적용. MaxDeliveryCount 초과 시 DLQ로 격리해 원인 분석 후 리드라이브(재게시). 세션/FIFO가 필요하면 SessionId 병행. 네트워크는 Private Endpoint로 사설화.
+
+
+## Azure Front Door Premium — 글로벌 엣지 + 사설 오리진(Private Link) + WAF 치트시트 (GFM)
+
+### TL;DR
+	•	문제: 인터넷에 노출하지 않고(Private) 전 세계로 빠르게 배포 + L7 보안 필요
+	•	해결: AFD Premium + Origin Private Link + WAF Policy
+	•	핵심: 엣지(Front Door)만 Public, 오리진은 VNet 내부 IP(Private Endpoint) 로 잠그고, AFD가 승인된 Private Link 로만 진입
+
+⸻
+
+### 구성요소 한눈에
+	•	Front Door(Std/Prem): 글로벌 L7 리버스 프록시/엣지, 라우팅·압축·캐시·장애극복(오리진 그룹)
+	•	WAF Policy: OWASP 규칙 + 사용자 정의(Geo, IP, Rate Limit 등), 라우트별/도메인별 연동
+	•	Origin Group: 백엔드 풀(Region 다중화), 헬스 프로브/부하분산 정책
+	•	Origin Private Link(Prem): AFD ↔ 오리진 사설 연결(오리진 Public 차단)
+	•	도메인/인증서: 커스텀 도메인(CNAME/ALIAS) + Managed/Bring-your-own TLS
+	•	Rules Engine: 리다이렉트/리라이트/헤더 삽입/캐시 제어/경로 기반 라우팅
+
+⸻
+
+### 표 — 언제 Premium + Private Link?
+
+요구	선택
+오리진 Public 완전 차단	Premium + Origin Private Link
+단순 전역 배포(오리진 Public 허용)	Standard/Premium(PL 불필요)
+L7 보안(WAF, Rate Limit)	Standard/Premium + WAF
+멀티-Region 액티브/액티브	Origin Group + 프로빙/우선순위
+정적 캐시 가속	Rules Engine + 캐시 정책
+
+
+⸻
+
+### 아키텍처(사설 오리진: Private Link)
+	1.	오리진(웹앱/VM/AppGW/Storage) 를 VNet Private Endpoint 로 구성(공용 접근 차단).
+	2.	AFD Premium 생성 → Origin Group 추가 → Origin에 “Private Link” 사용 체크.
+	3.	오리진 리소스에서 “AFD Private Link 연결 승인”(Pending 승인 흐름).
+	4.	WAF Policy 작성(관리형 규칙 + Geo/IP/Rate 제한) → Front Door에 연결(Association).
+	5.	Routes: example.com → /api/*는 App1, /static/*은 Storage 등 경로/도메인 기반 분기.
+	6.	DNS: www.example.com을 Front Door 엔드포인트로 CNAME/ALIAS, AFD에서 TLS 인증서 바인딩.
+
+방화벽/NSG: 오리진 네트워크는 해당 Private Endpoint NIC(및 AFD가 설정한 링크)만 허용. 불필요한 Public Inbound 전면 차단.
+
+⸻
+
+### 헬스 프로브/부하분산 베스트 프랙티스
+	•	프로브 경로 전용(/healthz) + 200 OK 명확화
+	•	오리진별 호스트 헤더 일치(가상호스팅)
+	•	우선순위+가중치로 액티브/스탠바이 또는 액티브/액티브
+	•	세션 부하편중 필요 시: Session Affinity(cookie) 사용(필요할 때만)
+
+⸻
+
+### Rules Engine(자주 쓰는 규칙)
+	•	HTTP→HTTPS 리다이렉트
+	•	경로 기반 라우팅/리라이트: /app/* → /index.html SPA
+	•	캐시 Key 튜닝: 헤더/쿼리 선택 포함/제외
+	•	보안 헤더 추가: HSTS, X-Content-Type-Options, CSP 등
+
+IF: Request scheme == HTTP
+THEN: Redirect to HTTPS (301)
+
+IF: Path begins_with "/static/"
+THEN: Route to Storage-origin, Cache-control: public, max-age=86400
+
+
+⸻
+
+보안(Zero Trust) 체크리스트
+	•	오리진 Public 비활성 + Private Endpoint 강제
+	•	AFD Premium Origin Private Link로만 진입(연결 승인 필수)
+	•	WAF Policy(관리형 + 사용자 규칙/Rate Limit)
+	•	TLS 최신 정책, HSTS 적용
+	•	도메인 소유 검증 + Managed cert 자동 갱신
+	•	로그/메트릭(Access, WAF, 프록시 로그) → Log Analytics/SIEM
+
+⸻
+
+운영 팁
+	•	전환 절차: 새 AFD 라우트 준비 → 저 TTL로 DNS 스위치 → 모니터링 후 TTL 복구
+	•	오리진 장애 시 응답: 커스텀 에러 페이지/Failover 정책 세팅
+	•	비용: 요청 수, 아웃바운드, 룰 평가, WAF 평가에 비례 → 캐시/압축/경로 분리로 최적화
+	•	관측: 상태 코드 분포, WAF 매칭, 오리진 응답시간/실패율, 캐시 적중률
+
+⸻
+
+자주 나오는 함정
+	•	Private Link 승인 누락 → 오리진 Unreachable
+	•	오리진 Host 헤더 불일치 → 4xx/5xx
+	•	WAF 정책 연결 위치(전역 vs 라우트별) 혼동 → 의도치 않은 차단/통과
+	•	캐시 키에 불필요한 쿼리/헤더 포함 → 캐시 적중률 급락
+	•	DNS Apex 루트를 CNAME 못함 → ALIAS/ANAME 또는 프록시 DNS 기능 사용
+
+⸻
+
+미니 절차(체크리스트)
+	1.	오리진 Private Endpoint 만들고 Public 접근 Off
+	2.	AFD Premium → Origin Group → Origin(Private Link) 추가
+	3.	오리진 리소스에서 Private Link “승인”
+	4.	WAF Policy 작성/연결, Rules Engine 구성
+	5.	커스텀 도메인 + TLS 바인딩
+	6.	헬스 프로브/우선순위/가중치 튜닝
+	7.	로그/경보 배선 후 릴리즈
+
+⸻
+
+예상문제 3개
+	1.	객관식
+오리진을 인터넷에 노출하지 않고 전 세계에 서비스하려면 가장 적절한 조합은?
+
+	•	A. Standard Front Door + Service Endpoint
+	•	B. Premium Front Door + Origin Private Link + WAF Policy
+	•	C. Application Gateway + Public IP
+	•	D. CDN(3rd party) + NSG
+정답: B
+
+	2.	단답형
+AFD Premium에서 Private한 오리진으로만 트래픽을 유도하려면 오리진에 무엇을 활성화하고 어떤 절차가 필요한가?
+정답: Origin Private Link 활성화 후, 오리진 리소스 측 Private Link 연결 “승인”.
+	3.	서술형
+/static/* 정적 파일은 캐시로, /api/* 는 동적 백엔드(사설 오리진)로 라우팅하면서 L7 보안을 적용하라.
+모범요지: AFD Premium 구성 → Origin Group(Static=Storage, API=App) + API 오리진은 Private Link. Routes로 경로 분기, Rules Engine으로 /static/* 캐시/압축, /→https 리다이렉트. WAF Policy(관리형 규칙 + Rate Limit) 연결. 커스텀 도메인/TLS, 헬스 프로브와 우선순위 설정, 로그/경보 배선.
