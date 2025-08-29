@@ -18,5 +18,5 @@ work/
 
 # track only this file in work directory
 !work/학습/kice/CDS.md
-!work/학습/kice/images/
+!work/학습/kice/images
 !work/학습/kice/remind.md
