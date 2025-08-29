@@ -113,3 +113,4 @@
 * [work](work)
   * [학습](work/README.md)
     * [KICE](work/학습/kice/CDS.md)
+    * [remind](work/학습/kice/remind.md)
